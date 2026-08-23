@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sprite cat — prototype</title>
+<style>
+  :root {
+    --bg: #FFFFFF; --fg: #062E3E; --fg-dim: #3D5C48;
+    --line: rgba(6, 46, 62, 0.22);
+    --sans: ui-sans-serif, -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --cycle: 0.9s;
+    /* Sixteen drawings, so sixteen steps. At a 0.9s cycle that is 56ms a
+       drawing -- animation on twos, which is what the sheet was drawn for. */
+    --frames: 16;
+    --cell: 254px;
+    --stride: 132px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--sans);
+         font-size: 15px; -webkit-font-smoothing: antialiased; padding: 28px; }
+  h1 { font-size: 13px; font-weight: 500; letter-spacing: 0.3em; text-transform: uppercase; margin: 0 0 4px; }
+  p.note { margin: 0 0 26px; color: var(--fg-dim); max-width: 62ch; line-height: 1.5; }
+
+  .scene { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* Taller than the drawing needs, so there is road under the cat rather than
+     a line it appears to hang from. The sand band it replaced was 36px deep;
+     this is 37 below the edge. */
+  .track { position: relative; height: 320px; overflow: hidden; }
+  /* The ground, drawn rather than paved: a pencil line with the hand's wobble
+     in it, a little hatching along the surface, and some grit. No band and no
+     kerb -- the page stays white, the way the sheet is.
+
+     The tile is exactly one stride wide, which is not a design choice: the
+     strip is translated by one stride per cycle, so the pattern has to come
+     back to itself over that distance or the loop seams. Everything wobbling
+     inside the tile is built from sines with a whole number of cycles across
+     it, so the two edges agree to the pixel.
+
+     The edge line runs along the top of the tile with everything else below it,
+     so there is one definite line for the cat to stand on rather than a haze of
+     marks. It lands at 283, which is where the drawn feet meet their shadows --
+     so the shadows spread onto the road below the edge, as they should. Below
+     that the marks thin and lighten with depth, the way a receding surface
+     does, and they are allowed to run off either edge of the tile and wrap, so
+     the repeat has no bald stripe down it every 132px.
+
+     Shifted back by this track's index, so all the strips share one origin and
+     the ground reads as continuous across the seam between them. */
+  .ground { position: absolute; top: 278px; left: calc(-100% * var(--i));
+    width: calc(300% + var(--stride)); height: 42px;
+    background-image: url("images/road.png"); background-repeat: repeat-x;
+    animation: ground-x var(--cycle) linear infinite; will-change: transform; }
+  @keyframes ground-x { from { transform: translateX(0); } to { transform: translateX(calc(0px - var(--stride))); } }
+
+  /* A window one cell wide onto a strip sixteen cells long. The strip is moved
+     with transform, not background-position: transform is the one the
+     compositor will take, and stepping it keeps each drawing on screen for its
+     whole 56ms instead of sliding between them. */
+  /* Each drawing is cut out by what its ink is connected to, so a cell holds
+     one whole cat -- tail included -- and nothing of its neighbours.
+
+     Every cell is aligned on where its cat meets the ground -- the bottom arc
+     of the cast shadow -- and not on its lowest ink, which is a tail tip or a
+     trailing paw in half of these drawings and sits up to 20px off. Align on
+     the lowest ink and the ground jumps about between frames, which is what
+     made the cat look like it was hovering. All sixteen now put that contact
+     on row 212 exactly, so the window only has to place that row where the cat
+     should stand. 30px past the road's edge line, so the cat walks on the road
+     rather than along its front lip: 212 down the cell + 101 puts contact at
+     313, inside the 283-320 band. */
+  .window { position: absolute; left: 50%; top: 101px; width: var(--cell); height: 220px;
+    margin-left: calc(var(--cell) / -2); overflow: hidden; }
+  .film { position: absolute; top: 0; left: 0; height: 220px;
+    width: calc(var(--cell) * var(--frames));
+    image-rendering: auto;
+    background-image: url("images/cat-frames.png");
+    background-size: 100% 100%;
+    animation: film var(--cycle) steps(var(--frames)) infinite;
+    will-change: transform; }
+  @keyframes film { from { transform: translateX(0); }
+                    to   { transform: translateX(calc(var(--cell) * var(--frames) * -1)); } }
+
+  /* The script's half of the demo: both the cat and the ground under it are
+     driven from script, so the whole panel stops together when the thread
+     does. Leave the road on CSS and it carries on scrolling under a frozen
+     cat, which rather gives the game away. */
+  .film.js, .ground.js { animation: none; }
+
+  .captions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    border-top: 1px solid var(--line); }
+  .captions p { margin: 0; padding: 13px 10px; text-align: center; font-size: 12.5px; color: var(--fg-dim); }
+  .captions b { display: block; color: var(--fg); font-weight: 500; }
+  button { font: inherit; font-size: 9.5px; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--fg); background: transparent; border: 1px solid var(--line); padding: 9px 14px;
+    cursor: pointer; margin-top: 22px; }
+  button:hover { background: var(--fg); color: var(--bg); }
+</style>
+</head>
+<body>
+
+<h1>Sprite cat</h1>
+<p class="note">Prototype, not wired into the demo. The sixteen drawings off the model sheet,
+cut out by connected ink so each cell holds one whole cat and none of its neighbours, paper
+knocked off, lined up on the ground line and on the head, and run at sixteen steps to the cycle. Three panels: on the left the cat and its road are both moved from script, in
+the middle the cat is on the compositor but its road is not, and on the right both are. Press the
+button and watch what carries on.</p>
+
+<div class="scene">
+  <div class="track" style="--i: 0">
+    <span class="ground js"></span>
+    <div class="window"><div class="film js" id="jsFilm"></div></div>
+  </div>
+  <div class="track" style="--i: 1">
+    <span class="ground js"></span>
+    <div class="window"><div class="film"></div></div>
+  </div>
+  <div class="track" style="--i: 2">
+    <span class="ground"></span>
+    <div class="window"><div class="film"></div></div>
+  </div>
+</div>
+<div class="captions">
+  <p><b>JavaScript</b>cat and road both from script — main thread</p>
+  <p><b>Half and half</b>cat on the compositor, road from script</p>
+  <p><b>CSS</b>cat and road both stepped — compositor</p>
+</div>
+
+<button type="button" id="block">Block 2000 ms</button>
+
+<script>
+(() => {
+  'use strict';
+  const CYCLE_MS = 900, FRAMES = 16;
+  const root = getComputedStyle(document.documentElement);
+  const film = document.getElementById('jsFilm');
+  // Two of the three roads are ours: the left panel's, and the middle one's,
+  // where the cat is on the compositor but the ground under it is not.
+  const grounds = [...document.querySelectorAll('.ground.js')];
+  const cell = parseFloat(root.getPropertyValue('--cell'));
+  // One stride per cycle, the same distance the stylesheet's keyframes cover,
+  // read from the same custom property so the two roads cannot drift.
+  const stride = parseFloat(root.getPropertyValue('--stride'));
+
+  // Same clock the stylesheet is on, so the two strips sit on the same drawing.
+  const cssFilm = document.querySelector('.track .film:not(.js)');
+  let origin = null, tries = 0;
+  function phaseOrigin() {
+    if (origin !== null) return origin;
+    if (!cssFilm.getAnimations || ++tries > 120) return (origin = 0);
+    const a = cssFilm.getAnimations()[0], st = a && a.startTime;
+    const v = typeof st === 'number' ? st : (st && st.value);
+    if (typeof v === 'number' && isFinite(v)) origin = v;
+    return origin === null ? 0 : origin;
+  }
+
+  function frame(now) {
+    let p = ((now - phaseOrigin()) % CYCLE_MS) / CYCLE_MS;
+    if (p < 0) p += 1;
+    // Three writes a frame, every one of them needing this thread: one drawing
+    // stepping, two roads running smoothly under their cats.
+    const i = Math.floor(p * FRAMES);
+    film.style.transform = 'translateX(' + (-i * cell) + 'px)';
+    const road = 'translateX(' + (-p * stride) + 'px)';
+    for (const g of grounds) g.style.transform = road;
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  document.getElementById('block').addEventListener('click', () => {
+    const end = performance.now() + 2000;
+    let sink = 0;
+    while (performance.now() < end) for (let i = 0; i < 3000; i++) sink += Math.sqrt(i * 1.0001);
+    return sink;
+  });
+})();
+</script>
+</body>
+</html>
