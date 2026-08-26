@@ -1,2 +1,3 @@
-# browser-main-thread
-Tool for comparing techniques for breaking up work on the browser's main thread
+# Keep The Browser's Main Thread Free
+
+This repo contains the demos used in my talk of the same name at P99 CONF 2026.
