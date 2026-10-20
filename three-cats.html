@@ -3,17 +3,27 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sprite cat</title>
+<title>Three Ways</title>
 <style>
   :root {
     --bg: #FFFFFF; --fg: #062E3E; --fg-dim: #3D5C48;
     --line: rgba(51, 48, 42, 0.22);
     --sans: ui-sans-serif, -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif;
     --cycle: 0.9s;
-    /* Sixteen drawings, so sixteen steps. At a 0.9s cycle that is 56ms a
-       drawing -- animation on twos, which is what the sheet was drawn for. */
+    /* Sixteen drawings. At a 0.9s cycle that is 56ms a drawing -- animation on
+       twos, which is what the sheet was drawn for. Read by the script, and
+       written out a second time by hand in @keyframes film below: change one
+       and the other has to change with it. */
     --frames: 16;
     --cell: 254px;
+    --cell-h: 220px;
+    /* The sheet is cut 4x4 and not 16x1, which is the obvious way to lay out a
+       strip. WebKit hands any composited layer over 2048px on either side to a
+       tile cache -- cMaxPixelDimension in GraphicsLayerCA.cpp -- and a tiled
+       layer animating on the compositor flickers, because the tiles are
+       rasterised behind the transform that is moving them. 16x1 is 4064px
+       wide and tiles. 4x4 is 1016x880 and stays a single layer. */
+    --cols: 4;
     --stride: 132px;
   }
   * { box-sizing: border-box; }
@@ -51,25 +61,53 @@
      212 where the cat should stand: 30px past the road's edge line. */
   .window {
     position: absolute; left: 0; top: 101px;
-    width: var(--cell); height: 220px; margin-left: calc(var(--cell) / -2);
+    width: var(--cell); height: var(--cell-h); margin-left: calc(var(--cell) / -2);
     overflow: hidden; will-change: transform;
   }
   .film {
-    position: absolute; top: 0; left: 0; height: 220px;
-    width: calc(var(--cell) * var(--frames));
-    background-image: url("images/cat-frames.png"); background-size: 100% 100%;
+    position: absolute; top: 0; left: 0;
+    width: calc(var(--cell) * var(--cols));
+    height: calc(var(--cell-h) * var(--frames) / var(--cols));
+    background-image: url("images/cat-frames-grid.png"); background-size: 100% 100%;
     will-change: transform;
   }
 
   /* Whatever does not carry .css is written from script, every frame, on this
      thread. */
-  .film.css { animation: film var(--cycle) steps(var(--frames)) infinite; }
+  .film.css { animation: film var(--cycle) linear infinite; }
   .ground.css { animation: road var(--cycle) linear infinite; }
   /* Only ever true before the first cat has finished walking on. */
   .ground.held { animation-play-state: paused; }
 
-  @keyframes film { from { transform: translateX(0); }
-                    to   { transform: translateX(calc(var(--cell) * var(--frames) * -1)); } }
+  /* Sixteen holds, and not steps(16), which is what this obviously wants to be.
+     WebKit will not give an animation carrying a steps() timing function to
+     Core Animation -- animationCanBeAccelerated() in GraphicsLayerCA.cpp sees
+     the steps and returns false -- so in Safari the walk cycle would run on
+     this thread and stop dead the moment anything blocked it. Which is the one
+     thing this page exists to disprove. Chrome's compositor implements step
+     timing functions, so it never showed.
+
+     So each drawing is held flat across its whole slot and jumps in the last
+     0.01% of it. What Core Animation interpolates is 0.09ms wide. Nobody sees
+     it, and the animation is on the compositor where it belongs. */
+  @keyframes film {
+    0%,      6.24% { transform: translate(calc(var(--cell) *  0), calc(var(--cell-h) *  0)); }
+    6.25%,  12.49% { transform: translate(calc(var(--cell) * -1), calc(var(--cell-h) *  0)); }
+    12.5%,  18.74% { transform: translate(calc(var(--cell) * -2), calc(var(--cell-h) *  0)); }
+    18.75%, 24.99% { transform: translate(calc(var(--cell) * -3), calc(var(--cell-h) *  0)); }
+    25%,    31.24% { transform: translate(calc(var(--cell) *  0), calc(var(--cell-h) * -1)); }
+    31.25%, 37.49% { transform: translate(calc(var(--cell) * -1), calc(var(--cell-h) * -1)); }
+    37.5%,  43.74% { transform: translate(calc(var(--cell) * -2), calc(var(--cell-h) * -1)); }
+    43.75%, 49.99% { transform: translate(calc(var(--cell) * -3), calc(var(--cell-h) * -1)); }
+    50%,    56.24% { transform: translate(calc(var(--cell) *  0), calc(var(--cell-h) * -2)); }
+    56.25%, 62.49% { transform: translate(calc(var(--cell) * -1), calc(var(--cell-h) * -2)); }
+    62.5%,  68.74% { transform: translate(calc(var(--cell) * -2), calc(var(--cell-h) * -2)); }
+    68.75%, 74.99% { transform: translate(calc(var(--cell) * -3), calc(var(--cell-h) * -2)); }
+    75%,    81.24% { transform: translate(calc(var(--cell) *  0), calc(var(--cell-h) * -3)); }
+    81.25%, 87.49% { transform: translate(calc(var(--cell) * -1), calc(var(--cell-h) * -3)); }
+    87.5%,  93.74% { transform: translate(calc(var(--cell) * -2), calc(var(--cell-h) * -3)); }
+    93.75%, 100%   { transform: translate(calc(var(--cell) * -3), calc(var(--cell-h) * -3)); }
+  }
   @keyframes road { from { transform: translateX(0); }
                     to   { transform: translateX(calc(0px - var(--stride))); } }
 
@@ -92,9 +130,23 @@
   button:hover { border-color: var(--fg); }
   button[aria-pressed="true"] { background: var(--fg); border-color: var(--fg); color: var(--bg); }
   :focus-visible { outline: 1px solid var(--fg); outline-offset: 3px; }
+
+  /* Page switcher: one narrow strip across the top of both demos. */
+  .pages { display: flex; align-items: center; gap: 22px; height: 32px;
+           padding: 0 28px; border-bottom: 1px solid var(--line);
+           font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; }
+  .pages a { color: var(--fg-dim); text-decoration: none; padding: 4px 0; }
+  .pages a:hover { color: var(--fg); }
+  .pages a[aria-current="page"] { color: var(--fg); box-shadow: inset 0 -1px currentColor; }
+  .pages { margin: -28px -28px 28px; }
 </style>
 </head>
 <body>
+
+<nav class="pages" aria-label="Demos">
+  <a href="index.html">Timeline</a>
+  <a href="three-cats.html" aria-current="page">Three Ways</a>
+</nav>
 
 <div class="top">
   <button type="button" id="block">Block the Main Thread</button>
@@ -131,6 +183,8 @@
   const CYCLE_MS = parseFloat(css.getPropertyValue('--cycle')) * 1000;
   const FRAMES = parseInt(css.getPropertyValue('--frames'), 10);
   const CELL = parseFloat(css.getPropertyValue('--cell'));
+  const CELL_H = parseFloat(css.getPropertyValue('--cell-h'));
+  const COLS = parseInt(css.getPropertyValue('--cols'), 10);
   const STRIDE = parseFloat(css.getPropertyValue('--stride'));
   // A cat crosses the stage at exactly the speed the road runs under it. It
   // has to: its legs cover one stride per cycle, so at any other speed the feet
@@ -224,7 +278,11 @@
     // One phase, shared by every cat.
     let p = (now - phaseOrigin()) % CYCLE_MS;
     if (p < 0) p += CYCLE_MS;
-    const shot = 'translateX(' + (-Math.floor(p / CYCLE_MS * FRAMES) * CELL) + 'px)';
+    // Same cell the stylesheet's keyframes are on at this moment, read off the
+    // same grid: across for the column, down for the row.
+    const f = Math.floor(p / CYCLE_MS * FRAMES);
+    const shot = 'translate(' + (-(f % COLS) * CELL) + 'px, '
+               + (-Math.floor(f / COLS) * CELL_H) + 'px)';
 
     cats.forEach((c) => {
       if (!c.on) {

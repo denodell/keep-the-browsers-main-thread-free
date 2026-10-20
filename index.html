@@ -3,47 +3,51 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Main Thread Bench</title>
+<title>Timeline</title>
 <style>
   :root {
-    /* Instrumentation ground: cool, flat, a step darker than the product
-       panel, which stays warm and slightly raised. The two surfaces are
-       told apart by temperature and elevation, not just by lightness. */
+    /* Instrumentation ground: cool and flat, so the white panel above it
+       reads as the thing a user would actually see. */
     --bg: #DADFE0;
+    --lane: #C2CACD;
+    --lane-hi: #C2CACC;
     --fg: #0F1214;
-    --fg-dim: #3F4749;
-    --fg-faint: #636C6F;
-    --line: rgba(15, 18, 20, 0.22);
-    --line-soft: rgba(15, 18, 20, 0.1);
+    --fg-dim: #2C3437;
+    --fg-faint: #46504F;
+    --line: rgba(15, 18, 20, 0.34);
+    --line-soft: rgba(15, 18, 20, 0.2);
     --signal: #A32414;
-    --flash: rgba(15, 18, 20, 0.10);
-    --field: transparent;
+    --warn: #B8791B;
 
-    /* Read back by the canvas so the plot follows the same palette. */
-    --bar-low: rgba(15, 18, 20, 0.45);
-    --bar-mid: rgba(15, 18, 20, 0.88);
-    --bar-high: #A32414;
-    --rule-frame: rgba(15, 18, 20, 0.2);
-    --rule-long: rgba(15, 18, 20, 0.34);
-    --rule-peak: rgba(163, 36, 20, 0.7);
     --sans: ui-sans-serif, -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif;
     --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
-    --big: clamp(2.5rem, 5vw, 4rem);
-    --pad: clamp(20px, 3vw, 44px);
-    --gutter: clamp(20px, 3vw, 44px);
-    --axis: 38px;
-    --ceiling: 120;
+    --pad: clamp(16px, 2.4vw, 34px);
+
+    /* The sheet is 4064x220 over sixteen drawings, so a cell is 254 wide and
+       the point where the cat meets the ground is row 212 in every one of
+       them. Everything below is that geometry times --s, set from script so
+       the two languages cannot drift apart. */
+    --s: 0.8;
+    --cell: calc(254px * var(--s));
+    --filmh: calc(220px * var(--s));
+    --contact: calc(212px * var(--s));
+    --roadh: calc(42px * var(--s));
+    --roadline: calc(35px * var(--s));
+    --stride: calc(132px * var(--s));
+
+    --h-ruler: 24px;
+    --h-clip: 46px;
+    --h-tasks: 74px;
+    --gutter: 150px;
   }
 
   * { box-sizing: border-box; }
-
   html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 
   body {
     margin: 0;
-    min-height: 100vh;
-    min-height: 100dvh;
+    min-height: 100vh; min-height: 100dvh;
     background: var(--bg);
     color: var(--fg);
     font-family: var(--sans);
@@ -51,1272 +55,1199 @@
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     display: grid;
-    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr) auto;
   }
+  @media (min-width: 981px) { body { height: 100vh; height: 100dvh; } }
 
   ::selection { background: var(--fg); color: var(--bg); }
-
-  :focus-visible { outline: 1px solid var(--fg); outline-offset: 3px; }
-
-  /* On a real viewport the filter, the chart and the controls stay pinned,
-     and only the readouts below them scroll: you can always type and watch. */
-  /* Spare height belongs to the last band, so its rule meets the controls
-     instead of leaving a void between them. */
-  main { display: flex; flex-direction: column; }
-  main > .detail { flex: 1 0 auto; align-content: start; }
-
-  @media (min-width: 901px) {
-    body { height: 100vh; height: 100dvh; }
-    main { overflow-y: auto; scrollbar-width: thin; }
-  }
+  :focus-visible { outline: 1px solid currentColor; outline-offset: 3px; }
 
   /* ------------------------------------------------------------------ */
   /* Masthead                                                            */
   /* ------------------------------------------------------------------ */
 
-  /* Sits between the product panel and the readouts, so it needs the same
-     closing rule every band below it has. */
-  .masthead {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 24px;
-    padding: calc(var(--pad) * 0.45) var(--pad);
-    border-bottom: 1px solid var(--line);
-  }
-
-  .wordmark {
-    font-size: 12px;
-    font-weight: 500;
-    letter-spacing: 0.36em;
-    text-transform: uppercase;
-    margin: 0;
-  }
-
-  .masthead__meta {
-    display: flex;
-    gap: clamp(14px, 3vw, 36px);
-    font-size: 10px;
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
-    color: var(--fg-dim);
-    font-variant-numeric: tabular-nums;
-  }
-
   /* ------------------------------------------------------------------ */
-  /* Shared type                                                         */
+  /* Viewer. The product panel: warm, raised, no instrumentation on it.  */
   /* ------------------------------------------------------------------ */
 
-  .eyebrow,
-  .key {
-    display: block;
-    font-size: 10px;
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
-    color: var(--fg-dim);
-    margin: 0 0 6px;
+  .viewer {
+    position: relative;
+    background: #FFFFFF; color: #0B0B0B;
+    display: grid; grid-template-rows: minmax(0, 1fr);
+    overflow: hidden; min-height: 0;
   }
 
-  .caption {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: 16px;
-    font-size: 10px;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--fg-dim);
-    font-variant-numeric: tabular-nums;
-    min-height: 15px;
+  .stage { position: relative; overflow: hidden;
+           height: 100%; min-height: 186px; max-height: 348px; align-self: end; }
+
+  /* The road belongs to the stage, not to the cat: it runs under a cat that
+     is walking on the spot, so the only thing that says how fast the animal
+     is moving is how fast the ground goes past. When the thread is taken
+     away, both stop in the same instant. */
+  .road {
+    position: absolute; left: 0; bottom: 0; height: var(--roadh);
+    width: calc(100% + var(--stride));
+    background-image: url("images/road.png"); background-repeat: repeat-x;
+    background-size: var(--stride) var(--roadh);
+    will-change: transform;
   }
+
+  /* A window one cell wide onto a strip sixteen cells long, placed so that
+     row 212 -- the bottom arc of the cast shadow, the one row all sixteen
+     drawings agree on -- lands on the road's edge line. */
+  .window {
+    position: absolute; left: 50%; margin-left: calc(var(--cell) / -2);
+    top: calc(100% - var(--roadh) + var(--roadline) - var(--contact));
+    width: var(--cell); height: var(--filmh); overflow: hidden;
+  }
+  .film {
+    position: absolute; top: 0; left: 0;
+    width: calc(var(--cell) * 16); height: var(--filmh);
+    background-image: url("images/cat-frames.png"); background-size: 100% 100%;
+    will-change: transform;
+  }
+
+  /* Sits over the stage while the thread is somewhere else. It is painted on
+     the frame *before* the task runs, which is the only frame there is: once
+     the task starts, nothing else gets painted until it is finished. */
+  .typing {
+    position: absolute; left: 50%; top: 20px; transform: translateX(-50%); z-index: 6;
+    width: min(360px, 62%); font: inherit; font-family: var(--mono); font-size: 14px;
+    color: #0B0B0B; background: #FFFFFF; border: 1px solid rgba(11, 11, 11, 0.3);
+    padding: 10px 14px; text-align: center; letter-spacing: 0.02em;
+  }
+  .typing::placeholder { color: #A9B0B1; letter-spacing: 0.06em; font-size: 12px; }
+  .typing:focus { outline: none; border-color: #0B0B0B; }
 
   /* ------------------------------------------------------------------ */
-  /* Frame chart                                                         */
+  /* Editor                                                              */
   /* ------------------------------------------------------------------ */
 
-  .frames {
-    padding: clamp(14px, 1.7vw, 21px) var(--pad);
-    border-bottom: 1px solid var(--line);
+  .editor {
+    border-top: 1px solid var(--line);
+    user-select: none; -webkit-user-select: none;
+    display: grid; grid-template-rows: auto auto auto; min-height: 0;
   }
 
-  .plot { position: relative; }
+  .library {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 10px var(--pad); border-bottom: 1px solid var(--line-soft);
+  }
+  .library .key { flex: 0 0 auto; margin-right: 4px; }
+  .key { font-size: 11.5px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--fg-faint); }
 
-  canvas {
-    width: 100%;
-    height: clamp(96px, 11.5vh, 140px);
-    display: block;
+  .chip {
+    display: inline-flex; align-items: baseline; gap: 8px;
+    padding: 6px 10px; cursor: grab;
+    border: 1px solid var(--line); background: transparent; color: var(--fg);
+    font: inherit; font-size: 13.5px; white-space: nowrap;
+    transition: border-color 140ms ease, background 140ms ease;
+  }
+  .chip { text-transform: none; }      /* 500ms, not 500MS: it is a unit */
+  .chip:hover { border-color: var(--fg); }
+  .chip:active { cursor: grabbing; }
+  .chip .swatch { width: 7px; height: 7px; align-self: center; }
+  .sev-ok   { --sev: #9BA4A6; --on-sev: #0F1214; }
+  .sev-warn { --sev: #E0A63C; --on-sev: #241903; }
+  .sev-bad  { --sev: var(--signal); --on-sev: #F7F0E8; }
+  .swatch { background: var(--sev); }
+
+  /* ---- timeline ---------------------------------------------------- */
+
+  .timeline { display: grid; grid-template-columns: var(--gutter) minmax(0, 1fr);
+              padding: 12px var(--pad) 0; gap: 0; min-height: 0; align-items: start; }
+
+  .heads, .lanes {
+    grid-template-rows: var(--h-ruler) var(--h-clip) var(--h-tasks);
+    align-content: start;
+  }
+  .heads { display: grid; row-gap: 6px; padding-right: 14px; min-height: 0; }
+  .head { display: flex; flex-direction: column; justify-content: center; align-items: flex-end;
+          text-align: right; gap: 2px; overflow: hidden; min-height: 0; }
+  .head span { font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--fg-faint); }
+  .head b { font-size: 14px; font-weight: 500; letter-spacing: 0.01em; color: var(--fg); }
+  .head--on b { color: var(--fg); }
+  /* Sat on the ruler's own baseline rather than centred in its row, so the
+     label and the millisecond marks read as one line. */
+  .head--ruler { justify-content: flex-end; }
+
+  /* The track is fitted to this box, so at any ordinary size there is nothing
+     to scroll, and a scrollbar here is a bar across the foot of the track that
+     belongs to no lane. The overflow stays, because a window narrow enough to
+     hit the zoom clamp still needs to be able to scroll; it just stops drawing
+     itself. Nothing writes scrollLeft any more either -- keeping the playhead
+     in view was for when the zoom could outgrow this box, and it cannot. */
+  .scroller { overflow-x: auto; overflow-y: hidden;
+              scrollbar-width: none; -ms-overflow-style: none; }
+  .scroller::-webkit-scrollbar { display: none; }
+  .lanes { position: relative; display: grid; row-gap: 6px; min-width: 100%; }
+
+  .ruler { position: relative; cursor: ew-resize; border-bottom: 1px solid var(--line-soft); }
+  .tick { position: absolute; bottom: 0; width: 1px; height: 6px; background: var(--line); }
+  .tick.major { height: 11px; background: var(--line); }
+  .tick b { position: absolute; left: 5px; bottom: 0; font: 500 11.5px/1 var(--mono);
+            color: var(--fg-faint); letter-spacing: 0.04em; white-space: nowrap; }
+  .tick.end { transform: translateX(-1px); }
+  .tick.end b { left: auto; right: 4px; }
+
+  /* The clip. Its filmstrip is the sprite sheet itself, tiled once per walk
+     cycle, so a drawing sits exactly over the millisecond it is meant for:
+     the strip is a picture of the intent, and the track below it is a
+     picture of what the thread allowed. */
+  .lane-clip { position: relative; background: #FFFFFF; overflow: hidden;
+               outline: 1px solid var(--line-soft); outline-offset: -1px; }
+  .strip { position: absolute; inset: 0;
+    background-image: url("images/cat-frames.png"); background-repeat: repeat-x;
+    background-position: 0 50%; }
+  /* The cells the thread never got round to showing, struck through where
+     they sit on the strip. */
+  .strikes { position: absolute; inset: 0; display: block; width: 100%; height: 100%;
+             pointer-events: none; }
+
+  /* One hairline per drawing, so you can count them off against the track
+     below and see exactly which one a block is going to cost. */
+  .sprockets { position: absolute; inset: 0;
+    background-image: linear-gradient(to right, rgba(11, 11, 11, 0.26) 0 1px, transparent 1px);
+    background-repeat: repeat-x; }
+
+  /* Faint vertical rules at one frame apart. A block that crosses them is a
+     block that is going to cost frames, and you can count them off. */
+  .lane-tasks { position: relative; background: var(--lane);
+    outline: 1px solid var(--line-soft); outline-offset: -1px;
+    background-image: linear-gradient(to right, rgba(15, 18, 20, 0.13) 0 1px, transparent 1px);
+    background-repeat: repeat-x; background-position: 0 0; }
+  .task {
+    position: absolute; top: 6px; bottom: 15px; min-width: 3px;
+    background: var(--sev); color: var(--on-sev); cursor: grab;
+    border: 1px solid rgba(0, 0, 0, 0.22);
+    padding: 4px 6px; overflow: hidden;
+    display: flex; flex-direction: column; justify-content: flex-start; gap: 1px;
+  }
+  .task b { font-size: 13px; font-weight: 600; letter-spacing: 0.01em; white-space: nowrap;
+             line-height: 1.15; }
+  .task i { font-style: normal; font-family: var(--mono); font-size: 11px; opacity: 0.85;
+            line-height: 1.15; white-space: nowrap; }
+  /* What breaking it up cost. Bold rather than brighter, because the line is
+     muted with opacity and opacity is not something a child can argue with. */
+  .task i em { font-style: normal; font-weight: 700; }
+  .task.narrow { padding: 0; }
+  .task.narrow b, .task.narrow i { display: none; }
+  .task.sel { outline: 2px solid var(--fg); outline-offset: 1px; z-index: 3; }
+  .task { z-index: 2; }
+  .task .grip { position: absolute; right: 0; top: 0; bottom: 0; width: 9px; cursor: ew-resize;
+                background: linear-gradient(to right, transparent, rgba(0,0,0,0.3)); }
+  .task .grip::after { content: ""; position: absolute; right: 3px; top: 50%; height: 11px;
+    width: 1px; margin-top: -6px; background: rgba(255,255,255,0.55); box-shadow: 2px 0 rgba(255,255,255,0.55); }
+
+  /* Broken up, a block stops being one bar of work and becomes the elapsed
+     time that work now takes: the pale envelope is the wall clock, the solid
+     runs along the foot of it are the arithmetic, and they still add up to
+     exactly what they added up to before. They have only been pushed apart.
+
+     The runs get their own strip rather than the whole block, because a line
+     of text laid over a comb of five-pixel bars is a line of text nobody can
+     read. The label keeps the clear ground above them, and the argument is
+     the width either way -- which the ruler measures. */
+  .task.split { background: rgba(255, 255, 255, 0.55); color: var(--fg); }
+  .task.split .track { position: relative; align-self: stretch; flex: 1 1 auto;
+    min-height: 11px; margin: 3px -6px -4px; background: rgba(15, 18, 20, 0.11); }
+  .task.narrow .track { margin: 0; }
+  .task.split .pc { position: absolute; top: 0; bottom: 0; background: var(--sev); }
+  /* Only where the pieces touch, so the seam never eats into the work it is
+     there to separate: a microtask break has nothing to show between two
+     pieces but the seam, and a real one does not need it. */
+  .task.split.seam .pc { box-shadow: inset -1px 0 rgba(0, 0, 0, 0.26); }
+  /* Dashed while the width is still a forecast, solid once a run has settled it. */
+  .task.est { border-style: dashed; }
+
+  .playhead { position: absolute; left: 0; top: 0; bottom: 0; width: 1px; background: var(--fg);
+              pointer-events: none; z-index: 6; }
+  .playhead::before { content: ""; position: absolute; left: -5px; top: 0;
+    border-left: 5.5px solid transparent; border-right: 5.5px solid transparent;
+    border-top: 7px solid var(--fg); }
+
+  .ghost { position: fixed; z-index: 40; pointer-events: none; height: 34px;
+    display: flex; align-items: center; padding: 0 8px; opacity: 0.9;
+    background: var(--sev); color: var(--on-sev); font-size: 13px; font-weight: 600; }
+
+  /* ---- transport --------------------------------------------------- */
+
+  .transport { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+               padding: 12px var(--pad); }
+  .transport .sp { flex: 1 1 auto; }
+  button { font: inherit; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--fg); background: transparent; border: 1px solid var(--line);
+    padding: 8px 13px; cursor: pointer; white-space: nowrap;
+    transition: background 140ms ease, border-color 140ms ease, color 140ms ease; }
+  button:hover:not(:disabled) { border-color: var(--fg); }
+  button:disabled { opacity: 0.3; cursor: default; }
+  button[aria-pressed="true"] { background: var(--fg); border-color: var(--fg); color: var(--bg); }
+
+  /* One frame, given the whole width. The timeline's axis is 1800ms and the
+     pipeline's is 16.7ms, which is two orders of magnitude apart -- so the
+     stages inside a frame cannot live on the main axis at any useful zoom.
+     They get their own, on demand, over the top of it. */
+  .inspect {
+    position: absolute; left: var(--pad); right: var(--pad); bottom: 8px; z-index: 20;
+    background: #FFFFFF; border: 1px solid rgba(15, 18, 20, 0.3);
+    box-shadow: 0 2px 3px rgba(15, 18, 20, 0.05), 0 18px 40px -18px rgba(15, 18, 20, 0.4);
+    padding: 12px 16px 14px;
+  }
+  .inspect[hidden] { display: none; }
+  .inspect__bar { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+  .inspect__title { margin: 0 0 20px; font-size: 14px; color: var(--fg-dim); }
+  .inspect__title b { color: var(--fg); font-weight: 500; }
+  .inspect__title b.over { color: var(--signal); }
+
+  .inspect__plot { position: relative; height: 30px; background: #EDEFF0;
+                   border: 1px solid var(--line-soft); }
+  .inspect__plot span { position: absolute; top: 0; bottom: 0; overflow: hidden;
+    font: 500 11.5px/30px var(--sans); letter-spacing: 0.02em; color: #FFFFFF;
+    padding-left: 5px; white-space: nowrap; }
+  /* Hot where your code is, cooling towards the screen. */
+  .seg-task  { background: #A32414; }
+  .seg-raf   { background: #C4632F; }
+  .seg-style { background: #E0A63C; color: #241903 !important; }
+  .seg-paint { background: #9BA4A6; color: #0F1214 !important; }
+  /* Where the frame was supposed to have finished. */
+  .inspect__budget { position: absolute; top: -4px; bottom: -4px; width: 1px;
+    background: var(--fg); z-index: 3; }
+  .inspect__budget b { position: absolute; left: 4px; top: -13px;
+    font: 400 9px/1 var(--mono); letter-spacing: 0.06em; color: var(--fg); }
+
+  .inspect__keys { display: flex; gap: 18px; flex-wrap: wrap; margin: 9px 0 0;
+    font-family: var(--mono); font-size: 12px; color: var(--fg-faint);
+    font-variant-numeric: tabular-nums; }
+  .inspect__keys i { display: inline-block; width: 9px; height: 9px; margin-right: 6px; }
+  .inspect__keys b { color: var(--fg); font-weight: 400; }
+  .inspect__notes { margin: 8px 0 0; font-size: 13px; color: var(--fg-dim); }
+  .inspect__notes b { color: var(--fg); font-weight: 500; }
+  .inspect__notes b.hot { color: var(--signal); }
+
+  /* The strip is where the frames are, so the strip is what you open one from. */
+  .lane-clip { cursor: pointer; }
+
+  @media (max-width: 1200px) {
+    :root { --gutter: 126px; }
+    .library, .transport { gap: 7px; }
+    .chip { font-size: 12.5px; padding: 6px 9px; gap: 7px; }
+    button { padding: 7px 10px; letter-spacing: 0.12em; font-size: 10.5px; }
+    /* The gutter narrows with everything else, so its labels have to stop
+       wrapping -- a two-line label in a twenty-two pixel row is a cut-off one. */
+    .head b { font-size: 13px; white-space: nowrap; }
+    .head span { font-size: 10px; }
   }
 
-  /* Scale sits in the gutter left of the plot, so it never collides with a
-     bar. Positions are derived from the same 120 ms ceiling the plot uses. */
-  .scale {
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: var(--axis);
-    pointer-events: none;
+  @media (max-width: 980px) {
+    .heads { display: none; }
+    .timeline { grid-template-columns: minmax(0, 1fr); }
   }
 
-  .scale span {
-    position: absolute;
-    right: 12px;
-    bottom: calc(var(--v) * 100% / var(--ceiling));
-    transform: translateY(50%);
-    font-size: 9.5px;
-    letter-spacing: 0.08em;
-    color: var(--fg-dim);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .scale span:first-child { top: 1px; bottom: auto; transform: none; }
-
-  .frames .caption { padding-top: 10px; }
-
-  /* ------------------------------------------------------------------ */
-  /* Bands                                                               */
-  /* ------------------------------------------------------------------ */
-
-  /* One four-column grid governs every instrumentation band, so column
-     edges stack down the page instead of landing a few pixels apart.
-     With the grid doing the work, the vertical rules are just clutter. */
-  .band {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    column-gap: var(--gutter);
-    row-gap: clamp(14px, 1.8vw, 22px);
-    padding: clamp(14px, 1.7vw, 21px) var(--pad);
-    border-bottom: 1px solid var(--line);
-  }
-
-  .vitals > :last-child { grid-column: span 2; }
-  .detail > * { grid-column: span 2; }
-
-  /* ------------------------------------------------------------------ */
-  /* The filter band is the product, not the instrumentation. It is the  */
-  /* one thing on this page a user would ever see, so it gets the page   */
-  /* inverted: light ground, dark ink. Redefining the tokens flips every */
-  /* rule, hairline and placeholder inside it in one move.               */
-  /* ------------------------------------------------------------------ */
-
-  .work {
-    grid-template-columns: 1fr 1.618fr;
-    column-gap: var(--gutter);
-    background: #F5F3EF;
-    border-bottom: 0;
-    --bg: #F5F3EF;
-    --fg: #0B0B0B;
-    --fg-dim: #5E5E5A;
-    --fg-faint: #757570;
-    --line: rgba(11, 11, 11, 0.18);
-    --line-soft: rgba(11, 11, 11, 0.07);
-    --flash: rgba(11, 11, 11, 0.09);
-    --field: #FFFFFF;
-    --edge: rgba(11, 11, 11, 0.12);
-    color: var(--fg);
-    padding-top: clamp(16px, 1.8vw, 22px);
-    padding-bottom: clamp(16px, 1.8vw, 22px);
-    align-items: center;
-  }
-
-  /* ------------------------------------------------------------------ */
-  /* Vitals — INP                                                        */
-  /* ------------------------------------------------------------------ */
-
-  .big {
-    display: block;
-    font-size: var(--big);
-    line-height: 0.94;
-    font-weight: 400;
-    letter-spacing: -0.045em;
-    font-variant-numeric: tabular-nums;
-    color: var(--fg);
-  }
-
-  .is-none { color: var(--fg-faint); }
-  .is-yield { color: var(--fg); }
-  .is-block { color: var(--signal); }
-
-  .counts {
-    display: flex;
-    justify-content: space-between;
-    gap: 16px;
-    font-size: 10px;
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
-    color: var(--fg-dim);
-    font-variant-numeric: tabular-nums;
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--line);
-  }
-
-  .counts b { color: var(--fg); font-weight: 500; }
-
-  .caption b { color: var(--fg); font-weight: 500; }
-  .caption b.is-block { color: var(--signal); }
-
-  /* Toggled with visibility, not display: the punchline appears without
-     shoving the layout around mid-demo. */
-  .note {
-    margin: 12px 0 0;
-    font-size: 12.5px;
-    line-height: 1.5;
-    color: var(--fg-dim);
-    padding-left: 14px;
-    border-left: 1px solid var(--signal);
-    max-width: 68ch;
-    visibility: hidden;
-    opacity: 0;
-    transition: opacity 220ms ease;
-  }
-  .note.on { visibility: visible; opacity: 1; }
-  .note b { color: var(--fg); font-weight: 500; }
-  @media (prefers-reduced-motion: reduce) { .note { transition: none; } }
-
-  /* ------------------------------------------------------------------ */
-  /* Filter and results                                                  */
-  /* ------------------------------------------------------------------ */
-
-  /* The statement carries the panel: oversized, tight, ranged left, sized
-     to run out at roughly the height of the app beside it. */
-  .lede {
-    margin: 0;
-    max-width: 15ch;
-    font-size: clamp(1.4rem, 2.4vw, 2.2rem);
-    line-height: 1.1;
-    letter-spacing: -0.035em;
-    text-wrap: balance;
-  }
-
-  /* The product surfaces sit slightly above the ground. The readouts below
-     are flat by contrast — that is the whole point of the split. */
-  .filter,
-  .results {
-    background: var(--field);
-    border: 1px solid var(--edge);
-    border-radius: 4px;
-    box-shadow: 0 1px 1px rgba(11, 11, 11, 0.03), 0 10px 24px -12px rgba(11, 11, 11, 0.18);
-  }
-
-  .field-wrap { position: relative; }
-
-  .filter {
-    width: 100%;
-    font: inherit;
-    font-size: clamp(1.05rem, 1.4vw, 1.25rem);
-    letter-spacing: -0.012em;
-    color: var(--fg);
-    padding: 16px 46px;
-    transition: border-color 160ms ease, box-shadow 160ms ease;
-  }
-
-  .field-icon {
-    position: absolute;
-    left: 17px;
-    top: 50%;
-    width: 17px;
-    height: 17px;
-    transform: translateY(-50%);
-    color: var(--fg-faint);
-    pointer-events: none;
-    transition: color 160ms ease;
-  }
-
-  .field-wrap:focus-within .field-icon { color: var(--fg); }
-
-  /* Overrides the page's button styling: this one is an affordance inside a
-     field, not one of the bench's switches. */
-  .field-clear {
-    position: absolute;
-    right: 11px;
-    top: 50%;
-    transform: translateY(-50%);
-    display: grid;
-    place-items: center;
-    width: 26px;
-    height: 26px;
-    padding: 0;
-    border: 0;
-    border-radius: 50%;
-    background: transparent;
-    color: var(--fg-dim);
-  }
-
-  .field-clear[hidden] { display: none; }
-  .field-clear svg { width: 13px; height: 13px; }
-
-  .field-clear:hover {
-    background: rgba(11, 11, 11, 0.07);
-    border-color: transparent;
-    color: var(--fg);
-  }
-
-  .filter::placeholder { color: var(--fg-faint); }
-
-  .filter:focus {
-    outline: 0;
-    border-color: var(--fg);
-    box-shadow: 0 1px 1px rgba(11, 11, 11, 0.04), 0 14px 30px -14px rgba(11, 11, 11, 0.28);
-  }
-
-  .flash { animation: flash 320ms ease-out; }
-  @keyframes flash {
-    from { background: var(--flash); }
-    to { background: var(--field); }
-  }
-  @media (prefers-reduced-motion: reduce) { .flash { animation: none; } }
-
-  .status {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: 16px;
-    margin: 10px 2px 14px;
-    font-size: 13px;
-    color: var(--fg-dim);
-    min-height: 19px;
-  }
-
-  .results { padding: 3px 0; }
-
-  ul.list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    height: clamp(96px, 11.5vh, 128px);
-    overflow: auto;
-    font-size: 15px;
-    letter-spacing: -0.005em;
-    scrollbar-width: thin;
-    scrollbar-color: var(--fg-faint) transparent;
-    /* Fades the rows, not the card: the mask is on the scroller inside. */
-    -webkit-mask-image: linear-gradient(to bottom, #000 84%, transparent 100%);
-    mask-image: linear-gradient(to bottom, #000 84%, transparent 100%);
-  }
-
-  ul.list li {
-    padding: 9px 18px;
-    border-bottom: 1px solid var(--line-soft);
-    transition: background 120ms ease;
-  }
-
-  ul.list li:last-child { border-bottom: 0; }
-  ul.list li:hover { background: rgba(11, 11, 11, 0.035); }
-
-  ul.list::-webkit-scrollbar { width: 3px; }
-  ul.list::-webkit-scrollbar-thumb { background: var(--fg-faint); }
-
-  /* ------------------------------------------------------------------ */
-  /* Long animation frame detail                                         */
-  /* ------------------------------------------------------------------ */
-
-  /* Two columns with the band's own gutter, so these sit directly under
-     the two INP figures rather than on a rhythm of their own. */
-  .minis {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    column-gap: var(--gutter);
-    row-gap: clamp(11px, 1.2vw, 14px);
-  }
-
-  .mini > span:first-child {
-    display: block;
-    font-size: 10px;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--fg-dim);
-    margin-bottom: 5px;
-  }
-
-  /* API names keep their camelCase — uppercasing them loses the word break. */
-  .mini > span.api {
-    font-family: var(--mono);
-    font-size: 10.5px;
-    letter-spacing: 0.04em;
-    text-transform: none;
-  }
-
-  .mini > span:last-child {
-    display: block;
-    font-size: clamp(1.05rem, 1.7vw, 1.5rem);
-    line-height: 1.12;
-    letter-spacing: -0.02em;
-    font-variant-numeric: tabular-nums;
-    color: var(--fg);
-  }
-
-  /* Same weight as the rule above, so it has to come after it to win. */
-  .mini > span.is-block { color: var(--signal); }
-
-  .scripts {
-    font-family: var(--mono);
-    font-size: 11px;
-    line-height: 1.6;
-    color: var(--fg-dim);
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-height: 120px;
-    overflow: auto;
-    scrollbar-width: thin;
-  }
-
-  #supportOut { margin-top: 12px; }
-  #supportOut:empty { display: none; }
-  .unsupported { color: var(--signal); }
-
-  /* ------------------------------------------------------------------ */
-  /* Controls                                                            */
-  /* ------------------------------------------------------------------ */
-
-  .controls {
-    padding: clamp(14px, 1.6vw, 20px) var(--pad);
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    column-gap: var(--gutter);
-    align-items: start;
-  }
-
-  .actions { align-self: end; }
-
-  .field > label {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: 12px;
-    font-size: 10px;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    color: var(--fg-dim);
-    margin-bottom: 10px;
-  }
-
-  .field .value { white-space: nowrap; }
-  .field b { color: var(--fg); font-weight: 500; font-variant-numeric: tabular-nums; }
-
-  .select { position: relative; }
-
-  .select::after {
-    content: "";
-    position: absolute;
-    right: 2px;
-    bottom: 12px;
-    width: 6px;
-    height: 6px;
-    border-right: 1px solid var(--fg-dim);
-    border-bottom: 1px solid var(--fg-dim);
-    transform: rotate(45deg);
-    pointer-events: none;
-  }
-
-  select {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 100%;
-    font: inherit;
-    font-size: 14px;
-    color: var(--fg);
-    background: transparent;
-    border: 0;
-    border-bottom: 1px solid var(--line);
-    border-radius: 0;
-    padding: 0 24px 9px 0;
-    cursor: pointer;
-    transition: border-color 160ms ease;
-  }
-  select:hover { border-bottom-color: var(--fg); }
-  option { background: #FFFFFF; color: var(--fg); }
-
-  input[type="range"] {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 100%;
-    background: transparent;
-    margin: 0;
-    padding: 6px 0 9px;
-    cursor: ew-resize;
-  }
-
-  input[type="range"]::-webkit-slider-runnable-track { height: 1px; background: var(--line); }
-  input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 9px;
-    height: 16px;
-    margin-top: -8px;
-    background: var(--fg);
-    border: 0;
-    border-radius: 0;
-  }
-  input[type="range"]::-moz-range-track { height: 1px; background: var(--line); }
-  input[type="range"]::-moz-range-thumb {
-    width: 9px;
-    height: 16px;
-    background: var(--fg);
-    border: 0;
-    border-radius: 0;
-  }
-
-  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
-
-  button {
-    font: inherit;
-    font-size: 9.5px;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--fg);
-    background: transparent;
-    border: 1px solid var(--line);
-    border-radius: 0;
-    padding: 9px 14px;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
-  }
-
-  button:hover { background: var(--fg); border-color: var(--fg); color: var(--bg); }
-
-  /* ------------------------------------------------------------------ */
-  /* Recording view                                                      */
-  /* ------------------------------------------------------------------ */
-
-  body.recording .controls,
-  body.recording .lede { display: none; }
-  body.recording { --big: clamp(4rem, 9vw, 7.5rem); }
-  body.recording canvas { height: clamp(140px, 26vh, 280px); }
-  body.recording .mini > span:last-child { font-size: clamp(1.25rem, 2vw, 1.8rem); }
-
-  /* ------------------------------------------------------------------ */
-  /* Narrow                                                              */
-  /* ------------------------------------------------------------------ */
-
-  @media (max-width: 900px) {
-    /* Two columns wide enough for a figure each; anything wider spans. */
-    .band { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .work { grid-template-columns: minmax(0, 1fr); }
-    .vitals > :last-child,
-    .detail > * { grid-column: 1 / -1; }
-    .frames .caption { flex-direction: column; align-items: flex-start; gap: 5px; }
-    /* Reserving room for the note only pays off on the projector; on a
-       phone it just leaves a hole, and the page scrolls anyway. */
-    .note { display: none; }
-    .note.on { display: block; visibility: visible; opacity: 1; }
-    .minis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .controls .field:first-child,
-    .actions { grid-column: 1 / -1; }
-  }
+  /* Page switcher: one narrow strip across the top of both demos. */
+  .pages { display: flex; align-items: center; gap: 22px; height: 32px;
+           padding: 0 var(--pad); border-bottom: 1px solid var(--line);
+           font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; }
+  .pages a { color: var(--fg-dim); text-decoration: none; padding: 4px 0; }
+  .pages a:hover { color: var(--fg); }
+  .pages a[aria-current="page"] { color: var(--fg); box-shadow: inset 0 -1px currentColor; }
 </style>
 </head>
 <body>
 
-<section class="band work">
-  <p class="lede"><em>Find your favorite authors.</em><br />Every keystroke schedules the same work a different way.</p>
+<nav class="pages" aria-label="Demos">
+  <a href="index.html" aria-current="page">Timeline</a>
+  <a href="three-cats.html">Three Ways</a>
+</nav>
 
-  <div class="app">
-    <div class="field-wrap">
-      <svg class="field-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-        <circle cx="6.75" cy="6.75" r="4.25" fill="none" stroke="currentColor" stroke-width="1.5"></circle>
-        <path d="M10 10 L14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
-      </svg>
-      <input class="filter" id="filter" type="text" placeholder="Filter authors"
-             aria-label="Filter authors" autocomplete="off" spellcheck="false">
-      <button class="field-clear" id="clearFilter" type="button" aria-label="Clear filter" hidden>
-        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-          <path d="M4.5 4.5 L11.5 11.5 M11.5 4.5 L4.5 11.5" fill="none" stroke="currentColor"
-                stroke-width="1.5" stroke-linecap="round"></path>
-        </svg>
-      </button>
+<section class="viewer">
+  <div class="stage" id="stage">
+    <div class="road" id="road"></div>
+    <div class="window"><div class="film" id="film"></div></div>
+  </div>
+
+  <input class="typing" id="typing" type="text" spellcheck="false" autocomplete="off"
+         placeholder="type here">
+
+  <div class="inspect" id="inspect" hidden>
+    <div class="inspect__bar">
+      <p class="inspect__title" id="ins-title"></p>
+      <button type="button" id="ins-close">Close</button>
     </div>
-    <div class="status">
-      <span id="echo">Waiting for input</span>
-      <span id="matches"></span>
-    </div>
-    <div class="results">
-      <ul class="list" id="list" aria-live="off"></ul>
-    </div>
+    <div class="inspect__plot" id="ins-plot"></div>
+    <p class="inspect__keys" id="ins-keys"></p>
+    <p class="inspect__notes" id="ins-notes"></p>
   </div>
 </section>
 
-<header class="masthead">
-  <h1 class="wordmark">Main Thread Bench</h1>
-  <div class="masthead__meta">
-    <span id="fps">&mdash;</span>
+<section class="editor">
+
+  <div class="library">
+    <span class="key">Add task</span>
   </div>
-</header>
 
-<section class="frames">
-  <div class="plot">
-    <canvas id="chart" width="1200" height="240" aria-label="Frame durations, newest on the right"></canvas>
-    <div class="scale" aria-hidden="true">
-      <span style="--v: 120">120</span>
-      <span style="--v: 50">50</span>
-      <span style="--v: 16.7">16.7</span>
-    </div>
-  </div>
-  <div class="caption">
-    <span>Frame duration in ms &middot; newest right &middot; red over 50 ms</span>
-    <span>10 s window &middot; peak <b id="peak">&mdash;</b></span>
-  </div>
-</section>
-
-<main>
-  <section class="band vitals">
-    <div>
-      <span class="key">INP &middot; default threshold 104 ms</span>
-      <span class="big is-none" id="inpDefault">&mdash;</span>
+  <div class="timeline">
+    <div class="heads">
+      <div class="head head--ruler"><span>Main thread</span></div>
+      <div class="head head--on"><b>Animation</b></div>
+      <div class="head head--on"><b>Your tasks</b></div>
     </div>
 
-    <div>
-      <span class="key">INP &middot; threshold lowered to 16 ms</span>
-      <span class="big is-none" id="inpLow">&mdash;</span>
-    </div>
-
-    <div>
-      <div class="counts">
-        <span>Interactions counted &middot; default / 16 ms</span>
-        <b id="counts">0 / 0</b>
-      </div>
-      <p class="note" id="thresholdNote">
-        Event Timing ignores anything under <b>104 ms</b> unless you ask for less, so a panel built on
-        the defaults reports a healthy page.
-      </p>
-    </div>
-  </section>
-
-  <section class="band detail">
-    <div>
-      <p class="eyebrow">Long animation frame</p>
-      <div class="minis">
-        <div class="mini">
-          <span>Longest frame</span>
-          <span id="loafDuration">&mdash;</span>
+    <div class="scroller" id="scroller">
+      <div class="lanes" id="lanes">
+        <div class="ruler" id="ruler"></div>
+        <div class="lane-clip">
+          <div class="strip" id="strip"></div>
+          <div class="sprockets" id="sprockets"></div>
+          <canvas class="strikes" id="strikes"></canvas>
         </div>
-        <div class="mini">
-          <span class="api">blockingDuration</span>
-          <span id="loafBlocking">&mdash;</span>
-        </div>
-        <div class="mini">
-          <span>Render began</span>
-          <span id="loafRender">&mdash;</span>
-        </div>
-        <div class="mini">
-          <span>Style &amp; layout began</span>
-          <span id="loafStyle">&mdash;</span>
-        </div>
+        <div class="lane-tasks" id="lane-tasks"></div>
+        <div class="playhead" id="playhead"></div>
       </div>
     </div>
-
-    <div>
-      <p class="eyebrow">Attributed script</p>
-      <div class="scripts" id="loafScripts">Nothing recorded yet.</div>
-      <div class="scripts" id="supportOut"></div>
-    </div>
-  </section>
-</main>
-
-<section class="controls">
-  <div class="field select">
-    <label for="mode">Scheduling</label>
-    <select id="mode">
-      <option value="block">01 &mdash; Block: run it all in the handler</option>
-      <option value="timeout">02 &mdash; Chunk with setTimeout(0)</option>
-      <option value="yield">03 &mdash; Chunk with scheduler.yield()</option>
-      <option value="raf">04 &mdash; Chunk with requestAnimationFrame (the trap)</option>
-      <option value="raftimeout">05 &mdash; requestAnimationFrame then setTimeout</option>
-      <option value="worker">06 &mdash; Hand it to a worker (nothing to chunk)</option>
-    </select>
   </div>
 
-  <div class="field">
-    <label for="taskMs">Work per keystroke <span class="value"><b id="taskMsOut">300</b> ms</span></label>
-    <input id="taskMs" type="range" min="40" max="600" step="20" value="300">
+  <div class="transport">
+    <span class="sp"></span>
+    <button type="button" id="split" disabled>Break it up</button>
+    <button type="button" id="clear">Clear</button>
+    <span class="sp"></span>
   </div>
 
-  <div class="field">
-    <label for="chunkMs">Chunk budget <span class="value"><b id="chunkMsOut">8</b> ms</span></label>
-    <input id="chunkMs" type="range" min="2" max="50" step="2" value="8">
-  </div>
-
-  <div class="actions">
-    <button id="clickWork" type="button">Run from a click</button>
-    <button id="reset" type="button">Reset</button>
-    <button id="record" type="button">Recording view</button>
-    <button id="support" type="button">Support</button>
-  </div>
 </section>
 
 <script>
 (() => {
   'use strict';
 
+  /* ------------------------------------------------------------------ */
+  /* The take                                                            */
+  /* ------------------------------------------------------------------ */
+
+  let S = 0.8;                         // the whole scene, sheet geometry included
+  let CELL = 254 * S;                  // one drawing, on screen
+  let STRIDE = 132 * S;                // one stride, which is also one road tile
+  const FRAMES = 16;
+  const CYCLE = 900;                   // ms for the sixteen drawings: on twos
+  const TOTAL = 1800;                  // two cycles, so the loop is seamless
+  const VSYNC = 1000 / 60;
+  const SLOTS = Math.round(TOTAL / VSYNC);
+  const FRAME_MS = CYCLE / FRAMES;     // 56.25ms: what one drawing is owed
+  const CELLS = Math.round(TOTAL / FRAME_MS);   // cells on the strip, 32 of them
+  let SPEED = STRIDE / CYCLE;          // px per ms; the feet only stay planted at this one
+
+  /* Five ways to break between one chunk and the next, and only four of them
+     are yields. Each one is the real call, awaited for real -- the microtask
+     row is not a model of what a promise does to your frames, it is a promise
+     doing it. */
+  const YIELDS = [
+    { id: 'microtask', short: 'microtask', label: 'await Promise.resolve()',
+      run: () => Promise.resolve(), ok: true },
+    { id: 'timeout', short: 'setTimeout', label: 'await setTimeout(0)',
+      run: () => new Promise((r) => setTimeout(r, 0)), ok: true },
+    { id: 'raf', short: 'rAF', label: 'await requestAnimationFrame()',
+      run: () => new Promise((r) => requestAnimationFrame(r)), ok: true },
+    { id: 'yield', short: 'scheduler.yield', label: 'await scheduler.yield()',
+      run: () => scheduler.yield(),
+      ok: typeof scheduler !== 'undefined' && typeof scheduler.yield === 'function' },
+    { id: 'idle', short: 'idle', label: 'await requestIdleCallback()',
+      run: () => new Promise((r) => requestIdleCallback(r)),
+      ok: typeof requestIdleCallback === 'function' },
+  ];
+  const yieldBy = (id) => YIELDS.find((y) => y.id === id && y.ok) || YIELDS[1];
+
+  const LIBRARY = [{ dur: 500 }];
+
+  const PRESET = [];
+
   const $ = (id) => document.getElementById(id);
 
-  // Every readout goes through one formatter, so a four-figure reading reads
-  // as 1,240 ms rather than 1240 ms. Pinned to en-US because the page is
-  // English throughout and the separator should not follow the host locale.
-  const EMPTY = '\u2014';
-  const NUM = new Intl.NumberFormat('en-US');
-  const fmt = (v) => NUM.format(Math.round(v));
-  const fmtMs = (v) => `${fmt(v)} ms`;
-  const filter = $('filter');
-  const list = $('list');
-  const echo = $('echo');
-  const matches = $('matches');
-
-  // ---------------------------------------------------------------------
-  // Content. Every match is rendered, so a keystroke that narrows nothing
-  // repaints the whole list -- which is a fair bit of the cheap half of the
-  // work, and the same amount of it in every scheduling mode.
-  // ---------------------------------------------------------------------
-  const AUTHORS = [
-    'Kōbō Abe', 'Chinua Achebe', 'Douglas Adams', 'Ryūnosuke Akutagawa', 'Louisa May Alcott',
-    'Sholem Aleichem', 'Isabel Allende', 'Jorge Amado', 'Kingsley Amis', 'Martin Amis',
-    'Hans Christian Andersen', 'Sherwood Anderson', 'Maya Angelou', 'Jean Anouilh',
-    'Guillaume Apollinaire', 'Hannah Arendt', 'Aristophanes', 'Matthew Arnold', 'Isaac Asimov',
-    'Margaret Atwood', 'W. H. Auden', 'Jane Austen', 'Paul Auster', 'Isaac Babel',
-    'Ingeborg Bachmann', 'James Baldwin', 'J. G. Ballard', 'Honoré de Balzac', 'Julian Barnes',
-    'J. M. Barrie', 'Sebastian Barry', 'Georges Bataille', 'Charles Baudelaire',
-    'Simone de Beauvoir', 'Samuel Beckett', 'Aphra Behn', 'Saul Bellow', 'Walter Benjamin',
-    'Alan Bennett', 'Arnold Bennett', 'John Berger', 'Thomas Bernhard', 'John Betjeman',
-    'Ambrose Bierce', 'Adolfo Bioy Casares', 'Elizabeth Bishop', 'William Blake', 'Robert Bly',
-    'Enid Blyton', 'Giovanni Boccaccio', 'Roberto Bolaño', 'Heinrich Böll', 'Jorge Luis Borges',
-    'Elizabeth Bowen', 'Paul Bowles', 'Ray Bradbury', 'Bertolt Brecht', 'André Breton',
-    'Joseph Brodsky', 'Anne Brontë', 'Charlotte Brontë', 'Emily Brontë', 'Rupert Brooke',
-    'Gwendolyn Brooks', 'Elizabeth Barrett Browning', 'Robert Browning', 'Pearl S. Buck',
-    'Mikhail Bulgakov', 'John Bunyan', 'Anthony Burgess', 'Frances Hodgson Burnett',
-    'Robert Burns', 'William S. Burroughs', 'Samuel Butler', 'A. S. Byatt', 'Lord Byron',
-    'James M. Cain', 'Erskine Caldwell', 'Italo Calvino', 'Albert Camus', 'Karel Čapek',
-    'Truman Capote', 'Peter Carey', 'Alejo Carpentier', 'Lewis Carroll', 'Angela Carter',
-    'Raymond Carver', 'Willa Cather', 'Camilo José Cela', 'Blaise Cendrars',
-    'Miguel de Cervantes', 'Aimé Césaire', 'Raymond Chandler', 'Bruce Chatwin',
-    'Geoffrey Chaucer', 'John Cheever', 'Anton Chekhov', 'G. K. Chesterton', 'Kate Chopin',
-    'Agatha Christie', 'Sandra Cisneros', 'Tom Clancy', 'Arthur C. Clarke', 'Jean Cocteau',
-    'J. M. Coetzee', 'Samuel Taylor Coleridge', 'Colette', 'Wilkie Collins',
-    'Ivy Compton-Burnett', 'Joseph Conrad', 'James Fenimore Cooper', 'Pierre Corneille',
-    'Julio Cortázar', 'Noël Coward', 'Hart Crane', 'Stephen Crane', 'Michael Crichton',
-    'E. E. Cummings', 'Roald Dahl', 'Gabriele D\'Annunzio', 'Dante Alighieri', 'Rubén Darío',
-    'Robertson Davies', 'Daniel Defoe', 'Walter de la Mare', 'Don DeLillo', 'Thomas De Quincey',
-    'Anita Desai', 'Philip K. Dick', 'Charles Dickens', 'Emily Dickinson', 'Denis Diderot',
-    'Joan Didion', 'Annie Dillard', 'Isak Dinesen', 'E. L. Doctorow', 'John Donne',
-    'John Dos Passos', 'Fyodor Dostoevsky', 'Rita Dove', 'Arthur Conan Doyle',
-    'Margaret Drabble', 'Theodore Dreiser', 'John Dryden', 'W. E. B. Du Bois',
-    'Alexandre Dumas', 'Daphne du Maurier', 'Marguerite Duras', 'Lawrence Durrell',
-    'Friedrich Dürrenmatt', 'Umberto Eco', 'Maria Edgeworth', 'George Eliot', 'T. S. Eliot',
-    'James Ellroy', 'Ralph Ellison', 'Buchi Emecheta', 'Ralph Waldo Emerson', 'William Empson',
-    'Shūsaku Endō', 'Louise Erdrich', 'Jeffrey Eugenides', 'Euripides', 'Nuruddin Farah',
-    'William Faulkner', 'Elena Ferrante', 'Henry Fielding', 'F. Scott Fitzgerald',
-    'Penelope Fitzgerald', 'Gustave Flaubert', 'Ian Fleming', 'Ford Madox Ford',
-    'E. M. Forster', 'John Fowles', 'Anne Frank', 'Jonathan Franzen', 'Robert Frost',
-    'Carlos Fuentes', 'Athol Fugard', 'Neil Gaiman', 'Mavis Gallant', 'John Galsworthy',
-    'Gabriel García Márquez', 'Elizabeth Gaskell', 'Jean Genet', 'Kahlil Gibran',
-    'William Gibson', 'André Gide', 'Allen Ginsberg', 'Johann Wolfgang von Goethe',
-    'Nikolai Gogol', 'William Golding', 'Oliver Goldsmith', 'Witold Gombrowicz',
-    'Ivan Goncharov', 'Nadine Gordimer', 'Maxim Gorky', 'Günter Grass', 'Robert Graves',
-    'Graham Greene', 'Thomas Hardy', 'Nathaniel Hawthorne', 'Seamus Heaney', 'Joseph Heller',
-    'Ernest Hemingway', 'Frank Herbert', 'George Herbert', 'Hermann Hesse',
-    'Patricia Highsmith', 'Homer', 'Nick Hornby', 'A. E. Housman', 'Langston Hughes',
-    'Ted Hughes', 'Victor Hugo', 'Zora Neale Hurston', 'Aldous Huxley', 'Henrik Ibsen',
-    'Kazuo Ishiguro', 'Shirley Jackson', 'Henry James', 'P. D. James', 'Samuel Johnson',
-    'James Joyce', 'Franz Kafka', 'Yasunari Kawabata', 'John Keats', 'Jack Kerouac',
-    'Ken Kesey', 'Stephen King', 'Barbara Kingsolver', 'Rudyard Kipling', 'Heinrich von Kleist',
-    'Milan Kundera', 'Selma Lagerlöf', 'Philip Larkin', 'D. H. Lawrence', 'John le Carré',
-    'Ursula K. Le Guin', 'Harper Lee', 'Stanisław Lem', 'Doris Lessing', 'Primo Levi',
-    'C. S. Lewis', 'Sinclair Lewis', 'Clarice Lispector', 'Jack London',
-    'Henry Wadsworth Longfellow', 'Federico García Lorca', 'H. P. Lovecraft', 'Robert Lowell',
-    'Niccolò Machiavelli', 'Naguib Mahfouz', 'Norman Mailer', 'Bernard Malamud',
-    'Stéphane Mallarmé', 'Thomas Malory', 'André Malraux', 'Osip Mandelstam', 'Thomas Mann',
-    'Katherine Mansfield', 'Christopher Marlowe', 'Andrew Marvell', 'W. Somerset Maugham',
-    'Guy de Maupassant', 'Cormac McCarthy', 'Carson McCullers', 'Ian McEwan', 'Herman Melville',
-    'China Miéville', 'Arthur Miller', 'Henry Miller', 'A. A. Milne', 'Czesław Miłosz',
-    'John Milton', 'Yukio Mishima', 'Margaret Mitchell', 'Molière', 'Michel de Montaigne',
-    'L. M. Montgomery', 'Alberto Moravia', 'Toni Morrison', 'Haruki Murakami', 'Iris Murdoch',
-    'Robert Musil', 'Vladimir Nabokov', 'V. S. Naipaul', 'Pablo Neruda', 'Anaïs Nin',
-    'Frank Norris', 'Joyce Carol Oates', 'Edna O\'Brien', 'Flannery O\'Connor', 'Kenzaburō Ōe',
-    'Ben Okri', 'Michael Ondaatje', 'Eugene O\'Neill', 'George Orwell', 'Ovid', 'Wilfred Owen',
-    'Cynthia Ozick', 'Orhan Pamuk', 'Dorothy Parker', 'Boris Pasternak', 'Cesare Pavese',
-    'Octavio Paz', 'Georges Perec', 'Fernando Pessoa', 'Harold Pinter', 'Luigi Pirandello',
-    'Sylvia Plath', 'Plato', 'Edgar Allan Poe', 'Alexander Pope', 'Katherine Anne Porter',
-    'Ezra Pound', 'Anthony Powell', 'Terry Pratchett', 'Marcel Proust', 'Alexander Pushkin',
-    'Thomas Pynchon', 'François Rabelais', 'Jean Racine', 'Ayn Rand', 'Erich Maria Remarque',
-    'Mary Renault', 'Jean Rhys', 'Rainer Maria Rilke', 'Arthur Rimbaud', 'Marilynne Robinson',
-    'Philip Roth', 'Jean-Jacques Rousseau', 'J. K. Rowling', 'Arundhati Roy', 'Salman Rushdie',
-    'Antoine de Saint-Exupéry', 'J. D. Salinger', 'José Saramago', 'Jean-Paul Sartre',
-    'Dorothy L. Sayers', 'Friedrich Schiller', 'W. G. Sebald', 'Vikram Seth', 'Anne Sexton',
-    'William Shakespeare', 'George Bernard Shaw', 'Mary Shelley', 'Percy Bysshe Shelley',
-    'Georges Simenon', 'Isaac Bashevis Singer', 'Zadie Smith', 'Aleksandr Solzhenitsyn',
-    'Sophocles', 'Susan Sontag', 'Wole Soyinka', 'Muriel Spark', 'Edmund Spenser',
-    'Gertrude Stein', 'John Steinbeck', 'Stendhal', 'Laurence Sterne', 'Wallace Stevens',
-    'Robert Louis Stevenson', 'Bram Stoker', 'Tom Stoppard', 'Harriet Beecher Stowe',
-    'August Strindberg', 'William Styron', 'Italo Svevo', 'Jonathan Swift',
-    'Wisława Szymborska', 'Rabindranath Tagore', 'Amy Tan', 'Jun\'ichirō Tanizaki',
-    'Alfred Tennyson', 'William Makepeace Thackeray', 'Dylan Thomas', 'Henry David Thoreau',
-    'J. R. R. Tolkien', 'Leo Tolstoy', 'Ivan Turgenev', 'Mark Twain', 'Anne Tyler',
-    'Sigrid Undset', 'John Updike', 'Paul Valéry', 'Mario Vargas Llosa', 'Jules Verne',
-    'Virgil', 'Kurt Vonnegut', 'Derek Walcott', 'Alice Walker', 'David Foster Wallace',
-    'Evelyn Waugh', 'H. G. Wells', 'Eudora Welty', 'Edith Wharton', 'E. B. White',
-    'Walt Whitman', 'Oscar Wilde', 'Thornton Wilder', 'Tennessee Williams',
-    'William Carlos Williams', 'P. G. Wodehouse', 'Tom Wolfe', 'Virginia Woolf',
-    'William Wordsworth', 'Richard Wright', 'W. B. Yeats', 'Marguerite Yourcenar', 'Émile Zola',
-    'Stefan Zweig'
-  ];
-
-  const surname = (name) => name.split(' ').pop();
-
-  // Accents come off the search key, not the label, so typing "bronte" finds
-  // "Brontë" without folding a string per row on every keystroke.
-  const fold = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-
-  const rows = AUTHORS.slice().sort((a, b) => surname(a).localeCompare(surname(b)));
-  const keys = rows.map(fold);
-
-  function paintList(query) {
-    const q = fold(query.trim());
-    const found = q ? rows.filter((r, i) => keys[i].includes(q)) : rows;
-    const frag = document.createDocumentFragment();
-    for (let i = 0; i < found.length; i++) {
-      const li = document.createElement('li');
-      li.textContent = found[i];
-      frag.appendChild(li);
-    }
-    list.replaceChildren(frag);
-    matches.textContent = `${fmt(found.length)} result${found.length === 1 ? '' : 's'}`;
+  /* One scale for the scene, read off the monitor it has to fit. 219 units is
+     the drop from the top of a drawing to the stage floor: the contact row,
+     less the road's edge line, plus the road. Stylesheet and script both work
+     from it, so they cannot disagree about where the ground is. */
+  function scaleScene() {
+    const h = stage.clientHeight;
+    if (!h) return;
+    S = Math.max(0.55, Math.min(1.24, (h - 26) / 219));
+    CELL = 254 * S; STRIDE = 132 * S; SPEED = STRIDE / CYCLE;
+    document.documentElement.style.setProperty('--s', String(S));
   }
 
-  paintList('');
+  const stage = $('stage'), road = $('road'), film = $('film');
+  const scroller = $('scroller'), lanes = $('lanes'), ruler = $('ruler');
+  const strip = $('strip'), laneTasks = $('lane-tasks'), playhead = $('playhead');
+  const css = getComputedStyle(document.documentElement);
+  /* Whether a label fits has to be measured, and measuring it off the DOM
+     would mean a forced layout on every redraw -- on this page of all pages.
+     A detached canvas answers the same question without touching the
+     document, in the same two fonts the blocks are set in. */
+  const meas = document.createElement('canvas').getContext('2d');
+  const FONT_B = '600 13px ' + css.getPropertyValue('--sans').trim();
+  const FONT_I = '11px ' + css.getPropertyValue('--mono').trim();
+  const fits = (text, font, px) => { meas.font = font; return meas.measureText(text).width <= px; };
+  const strikes = $('strikes'), sctx = strikes.getContext('2d');
+  const btnSplit = $('split');
 
-  // ---------------------------------------------------------------------
-  // Synthetic work. A busy loop is the honest stand-in here: it occupies
-  // the thread the same way a large JSON.parse or a sort does, and it is
-  // the same cost on every run so the modes stay comparable.
-  // ---------------------------------------------------------------------
-  const UNIT_MS = 2;
+  let uid = 0;
+  const nextId = () => 't' + (++uid);
+  const sev = (d) => d <= VSYNC ? 'sev-ok' : d <= 50 ? 'sev-warn' : 'sev-bad';
 
-  function burn(ms) {
-    const end = performance.now() + ms;
-    let sink = 0;
-    while (performance.now() < end) {
-      for (let i = 0; i < 2000; i++) sink += Math.sqrt(i * 1.0001);
+  let tasks = PRESET.map((p) => ({ id: nextId(), chunks: 1, yield: 'timeout', ...p }));
+  /* Same work, longer wall clock, and the block says so. A block at fit zoom
+     is sixty pixels wide and two durations will not go in sixty pixels, so
+     the label is a ladder rather than a string: the longest rung that fits
+     wins, and the pair of numbers is the last thing to be given up because
+     the pair of numbers is the argument. */
+  const labels = (task) => {
+    const w0 = Math.round(task.dur), w1 = Math.round(spanOf(task));
+    return w1 - w0 >= 1
+      ? [w0 + 'ms \u2192 ' + w1 + 'ms', w0 + '\u2192' + w1 + 'ms', w0 + '\u2192' + w1]
+      : [w0 + 'ms'];
+  };
+
+  /* The second line: what the break cost as a share of the work, and then how
+     the break was made. The percentage is the punchline -- the durations say
+     the same thing but you have to do the arithmetic yourself -- so it is the
+     last thing on the line to be given up and the only thing on it set bold.
+     Each rung is carried as [what to measure, what to write], because the
+     emphasis is markup and markup has no width. */
+  const subs = (task) => {
+    const how = task.chunks > 1 ? task.chunks + '\u00D7 ' + yieldBy(task.yield).short : '';
+    const pc = Math.round((spanOf(task) / task.dur - 1) * 100);
+    if (!pc) return how ? [[how, how]] : [];
+    const grew = '+' + pc + '%', em = '<em>' + grew + '</em>';
+    return how ? [[grew + ' \u00B7 ' + how, em + ' \u00B7 ' + how], [grew, em]] : [[grew, em]];
+  };
+  const defaultYield = 'timeout';      // the one way the pieces hand it back
+  let selected = null;
+  let zoom = 0.6;                      // px per ms, set from the width by fit()
+  let playing = true;                  // the take runs from the moment it loads
+  let t = 0;                           // playhead, ms into the take
+  let lapStart = 0;                    // performance.now() that maps to t = 0
+  const fired = new Set();             // tasks already run this lap
+  const running = new Set();           // tasks part-way through their chunks
+  let pending = [];                    // tasks scheduled to run after this paint
+  let chain = Promise.resolve();       // so queued tasks run one after another
+  let runToken = 0;                    // bumped to abandon work already under way
+
+  /* The playhead is wall-clock time, and wall-clock time does not stop for a
+     blocked thread. So it is handed to the compositor as a plain transform
+     animation and left there: while a task holds this thread, the cat, the
+     road, the ticks and the strikes all stop dead and the playhead sails on
+     over them. Everything else on the page needs this thread. That one line
+     does not, and the gap between them is the whole point.
+
+     It stays in step by construction rather than by correction: the animation
+     sits on the document timeline, which is the same clock performance.now()
+     reads, so giving it a startTime of lapStart makes its progress identical
+     to t without anyone having to keep them level. */
+  const CAN_SWEEP = typeof playhead.animate === 'function';
+  let sweep = null;
+
+  function syncSweep() {
+    if (!CAN_SWEEP) return;
+    if (sweep) sweep.cancel();
+    sweep = playhead.animate(
+      [{ transform: 'translateX(0px)' }, { transform: 'translateX(' + x(TOTAL) + 'px)' }],
+      { duration: TOTAL, iterations: Infinity, easing: 'linear' }
+    );
+    if (playing) {
+      try { sweep.startTime = lapStart; }        // same origin as t, so no drift
+      catch (_) { sweep.currentTime = t; }
+    } else {
+      sweep.currentTime = t;
+      sweep.pause();
     }
+  }
+
+  /* Everything the thread actually managed, one entry per vsync slot:
+     null = not reached yet, 0 = the playhead went past without a paint,
+     otherwise the drawing that was on screen. Nothing here is modelled --
+     it is written from inside requestAnimationFrame, so a gap in it is a gap
+     that really happened. */
+  let slots = new Array(SLOTS).fill(null);
+  let lastSlot = null;
+  let predicted = new Uint8Array(0);   // recomputed whenever the track changes
+  let frames = new Array(SLOTS).fill(null);   // per-slot breakdown, where the browser gave one
+  let openSlot = null;                        // which frame the inspector is showing
+
+  /* A measurement belongs to the edit that produced it. Change the edit and it
+     is no longer a reading of anything, so it goes -- and the forecast takes
+     over until the next run. */
+  function invalidate() {
+    slots = new Array(SLOTS).fill(null);
+    lastSlot = null;
+    frames = new Array(SLOTS).fill(null);
+    tasks.forEach((task) => { task.marks = null; });   // widths go back to forecast
+    closeFrame();
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Layout                                                              */
+  /* ------------------------------------------------------------------ */
+
+  const x = (ms) => ms * zoom;
+  const ms = (px) => px / zoom;
+
+  function buildLibrary() {
+    const bar = document.querySelector('.library');
+    LIBRARY.forEach((spec) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip ' + sev(spec.dur);
+      b.innerHTML = '<span class="swatch"></span>' + spec.dur + 'ms';
+      b.addEventListener('pointerdown', (e) => startNew(e, spec));
+      b.addEventListener('click', () => add(spec, t));
+      bar.appendChild(b);
+    });
+  }
+
+  function buildRuler() {
+    ruler.textContent = '';
+    for (let v = 0; v <= TOTAL; v += 100) {
+      const major = v % 300 === 0;
+      const d = document.createElement('div');
+      d.className = 'tick' + (major ? ' major' : '') + (v === TOTAL ? ' end' : '');
+      d.style.left = x(v) + 'px';
+      if (major) d.innerHTML = '<b>' + v + '</b>';
+      ruler.appendChild(d);
+    }
+  }
+
+  function layout() {
+    lanes.style.width = x(TOTAL) + 'px';
+    strip.style.backgroundSize = x(CYCLE) + 'px auto';       // one tile = one cycle
+    // What that tile actually comes out as, vertically, plus a little air.
+    const stripH = (x(CYCLE) / FRAMES) * (220 / 254);
+    document.documentElement.style.setProperty('--h-clip',
+      Math.round(Math.max(40, Math.min(124, stripH + 10))) + 'px');
+    $('sprockets').style.backgroundSize = x(CYCLE / FRAMES) + 'px 100%';
+    laneTasks.style.backgroundSize = x(VSYNC) + 'px 100%';   // one rule = one frame
+    buildRuler();
+    drawTasks();
+    sizeCanvas();
+    syncSweep();
+  }
+
+  function sizeCanvas() {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = strikes.parentElement.clientWidth || x(TOTAL);
+    strikes.width = Math.round(w * dpr);
+    strikes.height = Math.round(strikes.parentElement.clientHeight * dpr);
+    sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function fit() {
+    const w = Math.floor(scroller.getBoundingClientRect().width);
+    if (w > 40) zoom = Math.max(0.25, Math.min(2, w / TOTAL));
+    layout();
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* The track                                                           */
+  /* ------------------------------------------------------------------ */
+
+  /* What one break between two pieces costs, in milliseconds. None of these
+     is a round number picked because it draws well:
+
+       microtask   0    The queue is drained to the bottom before the browser
+                        is allowed to render, so nothing is handed back and
+                        nothing is waited for. Free, and worth what it costs.
+       setTimeout  4    Once a timer is nested five deep -- which a chunked
+                        loop is by its sixth piece -- the HTML spec clamps the
+                        wait to a minimum of 4ms.
+       yield       1    scheduler.yield resumes at the head of the queue,
+                        ahead of timers: the cheapest real hand-back there is.
+                        Still not free, because the turn still has to end.
+       rAF, idle   --   Cannot resume before the next vsync, so the wait is
+                        whatever is left of the frame the piece landed in.
+
+     A run measures the real thing and overwrites every one of them. This is
+     only what the track can say before you have pressed play. */
+  const GAP = { microtask: 0, timeout: 4, yield: 1 };
+  function gapFor(task, piece) {
+    if (task.yield === 'raf' || task.yield === 'idle') {
+      return Math.max(0, VSYNC - (piece % VSYNC));      // on to the next vsync
+    }
+    const g = GAP[task.yield];
+    return g === undefined ? GAP.timeout : g;
+  }
+
+  /* Where a block's pieces fall, in ms from the block's own start. A run that
+     finished wins; otherwise it is the table above. The block, its label and
+     the frame forecast are all drawn from this one list, so none of the three
+     can drift away from the other two. */
+  function pieces(task) {
+    if (task.marks && task.marks.length) return task.marks;
+    const n = Math.max(1, task.chunks || 1);
+    const piece = task.dur / n;
+    const gap = n > 1 ? gapFor(task, piece) : 0;
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const from = i * (piece + gap);
+      out.push([from, from + piece]);
+    }
+    return out;
+  }
+  const spanOf = (task) => { const p = pieces(task); return p[p.length - 1][1]; };
+
+  function drawTasks() {
+    laneTasks.querySelectorAll('.task').forEach((el) => el.remove());   // the canvas stays
+    tasks.slice().sort((a, b) => a.at - b.at).forEach((task) => {
+      const el = document.createElement('div');
+      const segs = pieces(task);
+      const split = segs.length > 1;
+      // The block is elapsed time now, so it ends where the take ends even
+      // when the work it is carrying would have run on past it.
+      const w = Math.max(3, Math.min(x(segs[segs.length - 1][1]), x(TOTAL - task.at)));
+      const piece = task.dur / Math.max(1, task.chunks);
+      // Coloured by the piece, because the piece is what actually goes on the
+      // thread in one go -- a block of red cut into thirteen grey ones is the
+      // point, and the colour has to move when the pieces do.
+      const seam = split && x(segs[1][0] - segs[0][1]) < 1.5;   // pieces that abut
+      el.className = 'task ' + sev(piece) + (task.id === selected ? ' sel' : '') +
+                     (w < 46 ? ' narrow' : '') + (split ? ' split' : '') +
+                     (seam ? ' seam' : '') + (split && !task.marks ? ' est' : '');
+      el.dataset.id = task.id;
+      el.style.left = x(task.at) + 'px';
+      el.style.width = w + 'px';
+      // The pieces, laid along the foot of that span where they land. However
+      // far apart they get pushed, the runs still come to task.dur between
+      // them: the strip they sit on is the waiting, and it is all that grew.
+      const inside = split ? '<span class="track">' + segs.map(([a, b]) =>
+        '<span class="pc" style="left:' + x(a) + 'px;width:' +
+        Math.max(1, x(b - a)) + 'px"></span>').join('') + '</span>' : '';
+      // Room inside the block, less its padding and a little air.
+      const room = w - 15;
+      const rungs = labels(task);
+      const head = rungs.find((r) => fits(r, FONT_B, room)) || rungs[rungs.length - 1];
+      // How it was broken up is the first thing to go: the comb below already
+      // shows that it was, and the line it gives up goes to the comb.
+      const sub = subs(task).find(([plain]) => fits(plain, FONT_I, room));
+      el.innerHTML = '<b>' + head + '</b>' +
+        (sub ? '<i>' + sub[1] + '</i>' : '') +
+        inside + '<span class="grip"></span>';
+      laneTasks.appendChild(el);
+    });
+    predicted = predictLost();
+
+    const sel = tasks.find((x) => x.id === selected) || null;
+    btnSplit.disabled = !sel;
+    btnSplit.textContent = sel && sel.chunks > 1 ? 'Merge back' : 'Break it up';
+  }
+
+  function add(spec, at) {
+    const task = { id: nextId(), dur: spec.dur, chunks: 1, yield: defaultYield,
+                   at: Math.max(0, Math.min(TOTAL - spec.dur, at)) };
+    tasks.push(task);
+    invalidate();
+    selected = task.id;
+    if (playing && t > task.at) fired.add(task.id);   // do not run something the playhead is already past
+    drawTasks();
+  }
+
+  function select(id) { selected = id; drawTasks(); }
+
+  /* Cutting a task up does not change how much work there is: the same
+     arithmetic runs, and it still starts where you put it. What it changes is
+     how long that work takes to get through, because every hand-back costs
+     something and there are now a dozen of them. So the block gets wider
+     while the colour inside it stays exactly the same size -- which is the
+     trade, and the whole argument. */
+  const chunkCount = (task) => Math.max(2, Math.ceil(task.dur / 8));
+
+  function toggleChunks() {
+    const task = tasks.find((x) => x.id === selected);
+    if (!task) return;
+    task.chunks = task.chunks > 1 ? 1 : chunkCount(task);
+    invalidate();
+    drawTasks();
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Dragging: existing blocks, and new ones off the library             */
+  /* ------------------------------------------------------------------ */
+
+  let drag = null, ghost = null;
+
+  function timeAt(clientX) {
+    return ms(clientX - lanes.getBoundingClientRect().left);
+  }
+
+  laneTasks.addEventListener('pointerdown', (e) => {
+    const el = e.target.closest('.task');
+    if (!el) { select(null); return; }
+    const task = tasks.find((x) => x.id === el.dataset.id);
+    select(task.id);
+    drag = {
+      mode: e.target.classList.contains('grip') ? 'resize' : 'move',
+      task, x0: e.clientX, at0: task.at, dur0: task.dur, moved: false,
+    };
+    e.preventDefault();
+  });
+
+  function startNew(e, spec) {
+    drag = { mode: 'new', spec, x0: e.clientX, moved: false };
+    e.preventDefault();
+  }
+
+  addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x0;
+    if (!drag.moved && Math.abs(dx) < 3) return;
+    drag.moved = true;
+
+    if (drag.mode === 'new') {
+      if (!ghost) {
+        ghost = document.createElement('div');
+        ghost.className = 'ghost ' + sev(drag.spec.dur);
+        ghost.textContent = drag.spec.dur + 'ms';
+        document.body.appendChild(ghost);
+      }
+      ghost.style.width = Math.max(20, x(drag.spec.dur)) + 'px';
+      ghost.style.left = (e.clientX - 6) + 'px';
+      ghost.style.top = (e.clientY - 17) + 'px';
+      return;
+    }
+
+    const task = drag.task;
+    if (drag.mode === 'move') {
+      task.at = Math.max(0, Math.min(TOTAL - task.dur, drag.at0 + ms(dx)));
+    } else {
+      task.dur = Math.max(2, Math.min(TOTAL - task.at, drag.dur0 + ms(dx)));
+    }
+    invalidate();
+    drawTasks();
+  });
+
+  addEventListener('pointerup', (e) => {
+    if (!drag) return;
+    if (drag.mode === 'new' && drag.moved) {
+      const r = laneTasks.getBoundingClientRect();
+      const inside = e.clientX >= r.left && e.clientX <= r.right &&
+                     e.clientY >= r.top - 24 && e.clientY <= r.bottom + 24;
+      if (inside) add(drag.spec, timeAt(e.clientX));
+    }
+    if (ghost) { ghost.remove(); ghost = null; }
+    drag = null;
+  });
+
+  /* Scrubbing. Dragging the ruler moves the playhead, and because the walk
+     is a pure function of the playhead, the cat scrubs with it. */
+  let scrubbing = false;
+  ruler.addEventListener('pointerdown', (e) => {
+    scrubbing = true;
+    // Capture only keeps the drag alive once the cursor leaves the ruler. It
+    // is a convenience, and it throws for any pointer the browser is not
+    // already tracking, so it must not be able to take the scrub down with it.
+    try { ruler.setPointerCapture(e.pointerId); } catch (_) {}
+    scrub(e);
+  });
+  ruler.addEventListener('pointermove', (e) => { if (scrubbing) scrub(e); });
+  ruler.addEventListener('pointerup', () => { scrubbing = false; });
+
+  function scrub(e) {
+    seek(Math.max(0, Math.min(TOTAL, timeAt(e.clientX))));
+  }
+
+  function seek(to) {
+    t = to;
+    lapStart = performance.now() - t;
+    lastSlot = null;                                  // do not blame the scrub for a gap
+    fired.clear();
+    tasks.forEach((task) => { if (task.at < t) fired.add(task.id); });
+    syncSweep();
+    render();
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Running it, for real                                                */
+  /* ------------------------------------------------------------------ */
+
+  // No modelling anywhere in here. A block on the track is arithmetic that
+  // actually runs, on this thread, for as long as the block is wide.
+  function burn(duration) {
+    const end = performance.now() + duration;
+    let sink = 0;
+    while (performance.now() < end) for (let i = 0; i < 1500; i++) sink += Math.sqrt(i * 1.0001);
     return sink;
   }
 
-  // ---------------------------------------------------------------------
-  // Yield strategies. Only this object changes between the five modes.
-  // ---------------------------------------------------------------------
-  const hasYield = typeof globalThis.scheduler?.yield === 'function';
+  /* The work is the same however it is cut up: task.dur of arithmetic, in
+     task.chunks pieces. What changes is the one line between the pieces --
+     and awaiting a resolved promise is not a yield. The microtask queue is
+     drained to the bottom before the browser is allowed to render, so a
+     chunked loop written that way hands the thread back to nobody and the
+     frames die exactly as they would have without it. */
+  async function runTask(task, token) {
+    running.add(task.id);
+    const n = Math.max(1, task.chunks || 1);
+    const each = task.dur / n;
+    const y = yieldBy(task.yield);
+    const marks = [];                         // where the pieces really fell
+    let base = null;
+    for (let i = 0; i < n; i++) {
+      if (token !== runToken) break;          // the take stopped under us
+      const from = performance.now();
+      burn(each);
+      const to = performance.now();
+      if (base === null) base = from;
+      marks.push([from - base, to - base]);
+      if (i < n - 1) await y.run();
+    }
+    running.delete(task.id);
+    /* A run that got all the way through is a reading of this block, so the
+       block stops guessing: it is redrawn at the width the browser actually
+       took, gaps and all. A half-finished one is a reading of nothing.
 
-  const handBack = {
-    timeout: () => new Promise((r) => setTimeout(r, 0)),
-    yield: () => (hasYield ? scheduler.yield() : new Promise((r) => setTimeout(r, 0))),
-    raf: () => new Promise((r) => requestAnimationFrame(() => r())),
-    raftimeout: () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
-  };
+       The redraw goes out on a timeout for the same reason the run did: it is
+       this page's own work, and it has no business landing in the middle of a
+       frame it is supposed to be measuring. */
+    if (token === runToken && marks.length === n) {
+      task.marks = marks;
+      setTimeout(drawTasks, 0);
+    }
+  }
 
-  let runToken = 0;
-  let lastEcho = '';
+  function runPending() {
+    const queue = pending;
+    pending = [];
+    const token = runToken;
+    for (const task of queue) chain = chain.then(() => runTask(task, token));
+  }
 
-  // ---------------------------------------------------------------------
-  // Off-thread. Some work has no seam to yield at -- one big parse, one
-  // big sort, one atomic call -- so the answer is not a smaller chunk but
-  // a different thread. Terminating a busy worker is also the only real
-  // cancel the platform offers: the main thread cannot interrupt its own
-  // loop, which is why every mode above has to check a token instead.
-  // ---------------------------------------------------------------------
-  const WORKER_SRC = `
-    self.onmessage = (e) => {
-      const started = performance.now();
-      const end = started + e.data.ms;
-      let sink = 0;
-      while (performance.now() < end) {
-        for (let i = 0; i < 2000; i++) sink += Math.sqrt(i * 1.0001);
+  function newLap() {
+    lastSlot = null;                 // do not blame the wrap for a gap
+    fired.clear();
+  }
+
+  function frame() {
+    requestAnimationFrame(frame);
+
+    if (playing) {
+      t = performance.now() - lapStart;
+      if (t >= TOTAL) {
+        lapStart += Math.floor(t / TOTAL) * TOTAL;
+        t = performance.now() - lapStart;
+        newLap();
       }
-      self.postMessage({ token: e.data.token, took: performance.now() - started, sink });
+
+      /* Anything the playhead has reached goes on the queue. It is run from a
+         timeout rather than from here, so the frame we are in the middle of
+         gets painted first -- which is what makes the badge visible and what
+         makes the freeze land where a real task would put it: between two
+         paints, not before one. */
+      if (playing) {
+        const due = tasks.filter((task) => !fired.has(task.id) && !running.has(task.id) && task.at <= t)
+                         .sort((a, b) => a.at - b.at);
+        if (due.length) {
+          due.forEach((task) => { fired.add(task.id); pending.push(task); });
+          // Run from a timeout rather than from here, so the frame we are in
+          // the middle of gets painted first and the freeze lands where a real
+          // task would put it: between two paints, not before one.
+          setTimeout(runPending, 0);
+        }
+      }
+
+      record();
+    }
+
+    render();
+  }
+
+  function record() {
+    const slot = Math.max(0, Math.min(SLOTS - 1, Math.floor(t / VSYNC)));
+    if (lastSlot !== null) for (let i = lastSlot + 1; i < slot; i++) slots[i] = 0;
+    slots[slot] = cellAt(t) + 1;      // +1 so slot 0 and cell 0 stay distinguishable
+    lastSlot = slot;
+  }
+
+  const drawingAt = (at) => Math.floor(((at % CYCLE) / CYCLE) * FRAMES) % FRAMES;
+
+  /* The browser will break a frame down into its stages, but only for frames
+     that already went wrong: nothing under about 50ms is reported at all. That
+     is the right half of the bargain for this page -- the frames worth opening
+     are exactly the ones it tells you about. */
+  const LOAF = typeof PerformanceObserver !== 'undefined' &&
+    PerformanceObserver.supportedEntryTypes &&
+    PerformanceObserver.supportedEntryTypes.includes('long-animation-frame');
+
+  if (LOAF) {
+    new PerformanceObserver((list) => list.getEntries().forEach(keepFrame))
+      .observe({ type: 'long-animation-frame', buffered: true });
+  }
+
+  function keepFrame(e) {
+    const at = e.startTime - lapStart;
+    if (at < 0 || at >= TOTAL) return;               // not part of the take on screen
+    const rel = (v) => (typeof v === 'number' && v > 0 ? v - e.startTime : null);
+    frames[Math.min(SLOTS - 1, Math.floor(at / VSYNC))] = {
+      at,
+      total: e.duration,
+      blocking: e.blockingDuration || 0,
+      renderStart: rel(e.renderStart),
+      styleStart: rel(e.styleAndLayoutStart),
+      paint: rel(e.paintTime),
+      present: rel(e.presentationTime),
+      forced: (e.scripts || []).reduce((n, x) => n + (x.forcedStyleAndLayoutDuration || 0), 0),
+      scripts: (e.scripts || []).map((x) => ({
+        who: x.invoker || x.name || 'script', dur: x.duration })),
     };
-  `;
-
-  let worker = null;
-  let workerUrl = '';
-  let workerBusy = false;
-  let workerSupported = true;
-
-  function spawnWorker() {
-    try {
-      workerUrl = URL.createObjectURL(new Blob([WORKER_SRC], { type: 'text/javascript' }));
-      const w = new Worker(workerUrl);
-      w.onmessage = (e) => {
-        workerBusy = false;
-        // A newer keystroke has already answered, so this result is stale.
-        if (e.data.token === runToken) {
-          echo.textContent = `${lastEcho} \u00b7 ${fmtMs(e.data.took)} off-thread`;
-        }
-      };
-      // Blob workers are refused on some file:// setups; fail loudly there.
-      w.onerror = () => { workerSupported = false; killWorker(); };
-      return w;
-    } catch (err) {
-      workerSupported = false;
-      return null;
-    }
   }
 
-  function killWorker() {
-    if (worker) worker.terminate();
-    if (workerUrl) URL.revokeObjectURL(workerUrl);
-    worker = null;
-    workerUrl = '';
-    workerBusy = false;
-  }
+  /* What the current edit is going to cost, worked out from the blocks rather
+     than measured from a run -- so the strip answers while you are still
+     dragging, before anything has been played.
 
-  function runOffThread(totalMs) {
-    const token = ++runToken;
+     This is the one thing on the page that is modelled, and it is drawn
+     differently for that reason: hollow while it is a forecast, filled in once
+     a run has been through and knows. The forecast can be wrong -- a stall
+     pushes later tasks along, and scheduler.yield does not hand the thread
+     back as often as the arithmetic here assumes -- which is exactly why
+     pressing play is still the thing that settles it. */
+  function predictLost() {
+    const lost = new Uint8Array(CELLS);
+    if (!tasks.length) return lost;
 
-    if (workerBusy) killWorker();          // supersede: a real cancel
-    if (!worker && workerSupported) worker = spawnWorker();
+    // Every stretch the thread is expected to be busy, in take time -- read
+    // off the same pieces the blocks are drawn from, so the strip and the
+    // track cannot end up telling you two different stories.
+    const busyIv = [];
+    tasks.forEach((task) => {
+      pieces(task).forEach(([a, b]) => busyIv.push([task.at + a, task.at + b]));
+    });
 
-    if (!worker) {
-      echo.textContent = `${lastEcho} \u00b7 no worker here, ran on the main thread`;
-      burn(totalMs);
-      return;
-    }
-
-    workerBusy = true;
-    worker.postMessage({ ms: totalMs, token });
-  }
-
-  async function doWork(mode, totalMs, chunkMs) {
-    const units = Math.max(1, Math.round(totalMs / UNIT_MS));
-
-    if (mode === 'block') {
-      burn(totalMs);
-      return;
-    }
-
-    if (mode === 'worker') {
-      runOffThread(totalMs);
-      return;
-    }
-
-    const token = ++runToken;
-    const give = handBack[mode];
-    let spent = 0;
-
-    for (let i = 0; i < units; i++) {
-      burn(UNIT_MS);
-      spent += UNIT_MS;
-      if (spent >= chunkMs && i < units - 1) {
-        spent = 0;
-        await give();
-        // A newer keystroke has started its own run, so this one stops.
-        if (token !== runToken) return;
-      }
-    }
-  }
-
-  // ---------------------------------------------------------------------
-  // The interaction. The cheap visual response happens first in every
-  // mode. What differs is only when the expensive work is allowed to run,
-  // which is the whole argument of the talk.
-  // ---------------------------------------------------------------------
-  function onInteraction(query) {
-    const mode = $('mode').value;
-    const totalMs = Number($('taskMs').value);
-    const chunkMs = Number($('chunkMs').value);
-
-    paintList(query);
-    clearBtn.hidden = query === '';
-    lastEcho = `Responded to "${query.slice(-24) || 'click'}"`;
-    echo.textContent = lastEcho;
-    filter.classList.remove('flash');
-    void filter.offsetWidth;
-    filter.classList.add('flash');
-
-    doWork(mode, totalMs, chunkMs);
-  }
-
-  const clearBtn = $('clearFilter');
-
-  filter.addEventListener('input', (e) => onInteraction(e.target.value));
-
-  clearBtn.addEventListener('click', () => {
-    filter.value = '';
-    filter.focus();
-    // Clearing narrows the list too, so it goes through the same path and
-    // is measured like any other interaction.
-    onInteraction('');
-  });
-  $('clickWork').addEventListener('click', () => onInteraction(filter.value));
-
-  // ---------------------------------------------------------------------
-  // Event Timing, observed twice. The only difference between the two
-  // observers is durationThreshold.
-  // ---------------------------------------------------------------------
-  function makeInpTracker(threshold, onUpdate) {
-    const perInteraction = new Map();
-    let supported = true;
-
-    try {
-      new PerformanceObserver((entryList) => {
-        for (const entry of entryList.getEntries()) {
-          const id = entry.interactionId;
-          if (!id) continue; // Not an interaction, so it is not INP material.
-          const prev = perInteraction.get(id) || 0;
-          if (entry.duration > prev) perInteraction.set(id, entry.duration);
-        }
-        onUpdate(perInteraction);
-      }).observe({ type: 'event', buffered: true, durationThreshold: threshold });
-    } catch (err) {
-      supported = false;
-    }
-
-    return { perInteraction, supported, clear: () => perInteraction.clear() };
-  }
-
-  function worstOf(map) {
-    let worst = 0;
-    for (const v of map.values()) if (v > worst) worst = v;
-    return worst;
-  }
-
-  function renderInp() {
-    const dWorst = worstOf(defaultTracker.perInteraction);
-    const lWorst = worstOf(lowTracker.perInteraction);
-    const dCount = defaultTracker.perInteraction.size;
-    const lCount = lowTracker.perInteraction.size;
-
-    const dEl = $('inpDefault');
-    const lEl = $('inpLow');
-
-    dEl.textContent = dCount ? fmtMs(dWorst) : EMPTY;
-    dEl.className = 'big ' + (dCount ? (dWorst > 200 ? 'is-block' : 'is-yield') : 'is-none');
-
-    lEl.textContent = lCount ? fmtMs(lWorst) : EMPTY;
-    lEl.className = 'big ' + (lCount ? (lWorst > 200 ? 'is-block' : 'is-yield') : 'is-none');
-
-    $('counts').textContent = `${fmt(dCount)} / ${fmt(lCount)}`;
-    $('thresholdNote').classList.toggle('on', lCount > 0 && dCount === 0);
-  }
-
-  const defaultTracker = makeInpTracker(104, renderInp);
-  const lowTracker = makeInpTracker(16, renderInp);
-
-  // ---------------------------------------------------------------------
-  // Long Animation Frames. This is what names the offending function.
-  // Chromium only at the time of writing.
-  // ---------------------------------------------------------------------
-  let loafSupported = true;
-  let worstLoaf = null;
-
-  function shortUrl(url) {
-    if (!url) return '(no source)';
-    try { return new URL(url).pathname.split('/').pop() || url; } catch { return url; }
-  }
-
-  function renderLoaf(entry) {
-    $('loafDuration').textContent = fmtMs(entry.duration);
-    $('loafDuration').className = entry.duration > 50 ? 'is-block' : '';
-    $('loafBlocking').textContent = fmtMs(entry.blockingDuration);
-    $('loafRender').textContent = `+${fmtMs(entry.renderStart - entry.startTime)}`;
-    $('loafStyle').textContent = entry.styleAndLayoutStart
-      ? `+${fmtMs(entry.styleAndLayoutStart - entry.startTime)}`
-      : 'not reached';
-
-    const scripts = [...(entry.scripts || [])].sort((a, b) => b.duration - a.duration).slice(0, 3);
-    $('loafScripts').textContent = scripts.length
-      ? scripts.map((s) =>
-          `${fmtMs(s.duration)}  ${s.invoker || '(unknown invoker)'}\n` +
-          `        ${shortUrl(s.sourceURL)}  char ${s.sourceCharPosition ?? '?'}` +
-          (s.sourceFunctionName ? `  in ${s.sourceFunctionName}()` : '')
-        ).join('\n\n')
-      : 'Frame recorded, but no script attribution in it.';
-  }
-
-  try {
-    new PerformanceObserver((entryList) => {
-      for (const entry of entryList.getEntries()) {
-        if (!worstLoaf || entry.duration > worstLoaf.duration) {
-          worstLoaf = entry;
-          renderLoaf(entry);
-        }
-      }
-    }).observe({ type: 'long-animation-frame', buffered: true });
-  } catch (err) {
-    loafSupported = false;
-    $('loafScripts').innerHTML = '<span class="unsupported">Long Animation Frames are not available in this browser. Record in Chrome or Edge.</span>';
-  }
-
-  // ---------------------------------------------------------------------
-  // Frame strip chart. Drawing in requestAnimationFrame is right here,
-  // because this genuinely is visual work tied to the next paint.
-  // ---------------------------------------------------------------------
-  const chart = $('chart');
-  const ctx = chart.getContext('2d');
-  const peakOut = $('peak');
-
-  // One bar per slice of wall clock rather than per frame. Two things fall
-  // out of that: the window is the same length on a 60 Hz projector as on a
-  // 120 Hz laptop, and a frame that overruns its slice fills every slice it
-  // covered, so a block is as wide on screen as it was long in time.
-  const SLOT_MS = 33;
-  const SLOTS = 300;
-  // Anything past this is a resume from a background tab, not a long frame.
-  const STALE_MS = 2000;
-
-  const deltas = new Float32Array(SLOTS);
-  let head = 0;
-  let last = performance.now();
-  let slotStart = last;
-  let slotWorst = 0;
-  let peakMs = 0;
-  let frames = 0;
-  let fpsAt = last;
-  let dpr = 1;
-  let axis = 0;
-  let ceiling = 120;
-
-  // Filled from CSS on size, so the plot never carries its own palette.
-  const paint = {
-    'bar-low': 'rgba(15, 18, 20, 0.45)',
-    'bar-mid': 'rgba(15, 18, 20, 0.88)',
-    'bar-high': '#A32414',
-    'rule-frame': 'rgba(15, 18, 20, 0.2)',
-    'rule-long': 'rgba(15, 18, 20, 0.34)',
-    'rule-peak': 'rgba(163, 36, 20, 0.7)'
-  };
-
-  // Full bleed means the backing store has to match the box, or the bars
-  // land on half pixels and go soft. The axis width is read back from CSS
-  // so the gutter and the scale labels cannot drift apart.
-  function sizeChart() {
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const box = chart.getBoundingClientRect();
-    chart.width = Math.max(1, Math.round(box.width * dpr));
-    chart.height = Math.max(1, Math.round(box.height * dpr));
-    const css = getComputedStyle(chart);
-    axis = (parseFloat(css.getPropertyValue('--axis')) || 0) * dpr;
-    // The scale labels are positioned against this same value in CSS.
-    ceiling = parseFloat(css.getPropertyValue('--ceiling')) || 120;
-    for (const k of Object.keys(paint)) paint[k] = css.getPropertyValue(`--${k}`).trim() || paint[k];
-  }
-  sizeChart();
-  window.addEventListener('resize', sizeChart);
-
-  function draw(now) {
-    const delta = now - last;
-    last = now;
-
-    if (delta < STALE_MS) {
-      slotWorst = Math.max(slotWorst, delta);
-
-      while (now - slotStart >= SLOT_MS) {
-        deltas[head] = slotWorst;
-        head = (head + 1) % SLOTS;
-        slotStart += SLOT_MS;
-        // Still inside the same long frame, so the next slice reads the same.
-        slotWorst = delta;
-      }
-
-      if (delta > peakMs) {
-        peakMs = delta;
-        peakOut.textContent = fmtMs(peakMs);
-        peakOut.className = peakMs > 50 ? 'is-block' : '';
-      }
-    } else {
-      slotStart = now;
-      slotWorst = 0;
-    }
-
-    frames++;
-    if (now - fpsAt > 500) {
-      $('fps').textContent = `${Math.round((frames * 1000) / (now - fpsAt))} fps`;
-      frames = 0;
-      fpsAt = now;
-    }
-
-    const w = chart.width;
-    const h = chart.height;
-    ctx.clearRect(0, 0, w, h);
-
-    // Reference rules: one frame at 60 Hz, and the 50 ms line a frame has
-    // to stay under to count as short.
-    const scale = h / ceiling;
-
-    function rule(ms, style, dash) {
-      // Half-pixel offset keeps a 1px rule off the seam between two rows.
-      // Clamped so a mark sitting at the ceiling still draws in full.
-      const raw = Math.round(h - ms * scale) + (dpr % 2 ? 0.5 : 0);
-      const y = Math.min(Math.max(raw, dpr / 2), h - dpr / 2);
-      ctx.strokeStyle = style;
-      ctx.lineWidth = dpr;
-      ctx.setLineDash(dash);
-      ctx.beginPath();
-      ctx.moveTo(axis, y);
-      ctx.lineTo(w, y);
-      ctx.stroke();
-    }
-
-    rule(16.7, paint['rule-frame'], []);
-    rule(50, paint['rule-long'], [4 * dpr, 6 * dpr]);
-    ctx.setLineDash([]);
-
-    const barW = (w - axis) / SLOTS;
+    // Same test the measurement uses: a drawing is lost when every vsync in
+    // its 56ms is swallowed.
+    const total = new Uint8Array(CELLS), blocked = new Uint8Array(CELLS);
     for (let i = 0; i < SLOTS; i++) {
-      const d = deltas[(head + i) % SLOTS];
-      if (!d) continue;
-      const bh = Math.min(h, d * scale);
-      ctx.fillStyle = d > 50 ? paint['bar-high'] : d > 20 ? paint['bar-mid'] : paint['bar-low'];
-      ctx.fillRect(axis + i * barW, h - bh, Math.max(1, barW - dpr), bh);
+      const at = i * VSYNC;
+      const c = Math.min(CELLS - 1, Math.floor(at / FRAME_MS));
+      total[c]++;
+      if (busyIv.some(([a, b]) => at >= a && at < b)) blocked[c]++;
+    }
+    for (let c = 0; c < CELLS; c++) if (total[c] && blocked[c] === total[c]) lost[c] = 1;
+    return lost;
+  }
+  const cellAt = (at) => Math.min(CELLS - 1, Math.floor(at / FRAME_MS));
+
+  /* Which cells of the strip made it to the screen. A cell is struck out only
+     once the playhead has been the whole way through it and no sample taken
+     inside it ever showed it: the thread was somewhere else for all 56ms it
+     was owed, so that drawing was never seen by anybody. */
+  function cellsShown() {
+    const shown = new Uint8Array(CELLS), seen = new Uint8Array(CELLS);
+    for (let i = 0; i < SLOTS; i++) {
+      const v = slots[i];
+      if (v === null) continue;
+      seen[Math.min(CELLS - 1, Math.floor((i * VSYNC) / FRAME_MS))] = 1;
+      if (v > 0) shown[v - 1] = 1;
+    }
+    return { shown, seen };
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Painting                                                            */
+  /* ------------------------------------------------------------------ */
+
+  function render() {
+    const drawing = drawingAt(t);
+    film.style.transform = 'translateX(' + (-drawing * CELL) + 'px)';
+    road.style.transform = 'translateX(' + (-((t * SPEED) % STRIDE)) + 'px)';
+
+    if (!CAN_SWEEP) playhead.style.transform = 'translateX(' + x(t) + 'px)';
+
+    const { shown, seen } = cellsShown();
+    drawStrikes(shown, seen);
+  }
+
+  /* One frame across the full width. Every boundary here is a field the
+     browser reported, not a share worked out from the total: where its own
+     work began, where style and layout began, when it was painted, and when it
+     actually reached the screen. */
+  function openFrame(slot) {
+    const f = frames[slot];
+    if (!f) return closeFrame();
+    if (openSlot === slot) return closeFrame();      // clicking it again puts it away
+    openSlot = slot;
+
+    const span = f.present || f.total;
+    const b1 = f.renderStart != null ? Math.max(0, f.renderStart) : span;
+    const b2 = f.styleStart != null ? Math.max(b1, f.styleStart) : b1;
+    const b3 = f.paint != null ? Math.max(b2, f.paint) : b2;
+
+    const parts = [
+      { cls: 'seg-task',  name: 'Task', from: 0, to: b1 },
+      { cls: 'seg-raf',   name: 'rAF callbacks', from: b1, to: b2 },
+      { cls: 'seg-style', name: 'Style, layout, paint', from: b2, to: b3 },
+      { cls: 'seg-paint', name: 'To screen', from: b3, to: span },
+    ];
+
+    const plot = $('ins-plot');
+    plot.textContent = '';
+    parts.forEach((p) => {
+      const pc = (p.to - p.from) / span * 100;
+      if (pc <= 0.15) return;
+      const el = document.createElement('span');
+      el.className = p.cls;
+      el.style.left = (p.from / span * 100) + '%';
+      el.style.width = pc + '%';
+      if (pc > 14) el.textContent = p.name;
+      plot.appendChild(el);
+    });
+    if (span > VSYNC) {
+      const mark = document.createElement('div');
+      mark.className = 'inspect__budget';
+      mark.style.left = (VSYNC / span * 100) + '%';
+      mark.innerHTML = '<b>16.7ms</b>';
+      plot.appendChild(mark);
     }
 
-    // Drawn last so it survives the bars: where the worst frame reached,
-    // still legible long after that frame has scrolled off the left.
-    if (peakMs > 0) rule(Math.min(peakMs, ceiling), paint['rule-peak'], []);
+    const over = span / VSYNC;
+    $('ins-title').innerHTML =
+      'Frame at <b>' + Math.round(f.at) + 'ms</b> &middot; took <b class="' +
+      (over > 1 ? 'over' : '') + '">' + ms1(span) + '</b>' +
+      (over > 1.2 ? ' &middot; <b class="over">' + over.toFixed(1) + '× its budget</b>' : '');
 
-    requestAnimationFrame(draw);
+    $('ins-keys').innerHTML = parts.map((p) =>
+      '<span><i class="' + p.cls + '"></i>' + p.name + ' <b>' + ms1(p.to - p.from) + '</b></span>'
+    ).join('');
+
+    const notes = [];
+    if (f.blocking) notes.push('Input would have waited <b class="hot">' + ms1(f.blocking) + '</b>');
+    notes.push('Layout forced from script <b' + (f.forced > 1 ? ' class="hot"' : '') + '>' +
+               ms1(f.forced) + '</b>');
+    if (f.scripts.length) {
+      notes.push(f.scripts.slice(0, 3).map((x) => x.who + ' <b>' + ms1(x.dur) + '</b>').join(', '));
+    }
+    $('ins-notes').innerHTML = notes.join(' &middot; ');
+    $('inspect').hidden = false;
   }
-  requestAnimationFrame(draw);
 
-  // ---------------------------------------------------------------------
-  // Controls
-  // ---------------------------------------------------------------------
-  $('taskMs').addEventListener('input', (e) => { $('taskMsOut').textContent = e.target.value; });
-  $('chunkMs').addEventListener('input', (e) => { $('chunkMsOut').textContent = e.target.value; });
+  function closeFrame() {
+    openSlot = null;
+    const el = document.getElementById('inspect');
+    if (el) el.hidden = true;
+  }
 
-  $('reset').addEventListener('click', () => {
-    defaultTracker.clear();
-    lowTracker.clear();
-    worstLoaf = null;
-    renderInp();
-    $('loafDuration').textContent = EMPTY;
-    $('loafDuration').className = '';
-    $('loafBlocking').textContent = EMPTY;
-    $('loafRender').textContent = EMPTY;
-    $('loafStyle').textContent = EMPTY;
-    if (loafSupported) $('loafScripts').textContent = 'Nothing recorded yet.';
-    deltas.fill(0);
-    peakMs = 0;
-    slotWorst = 0;
-    slotStart = performance.now();
-    peakOut.textContent = EMPTY;
-    peakOut.className = '';
+  const ms1 = (v) => (v < 10 ? v.toFixed(1) : Math.round(v)) + 'ms';
+
+  /* A drawing that never reached the screen is still sitting there in the
+     source, which is the whole cruelty of it: the work was drawn, laid out on
+     the right millisecond, and then skipped. Crossing it out on the strip
+     says that plainly -- these are the ones the thread cost you. */
+  function drawStrikes(shown, seen) {
+    const w = strikes.clientWidth, h = strikes.clientHeight;
+    if (!w || !h) return;
+    sctx.clearRect(0, 0, w, h);
+    sctx.lineCap = 'round';
+
+    for (let c = 0; c < CELLS; c++) {
+      // A cell the playhead has been through is answered; anything else is
+      // still only the forecast talking.
+      const measured = !!seen[c];
+      const gone = measured ? !shown[c] : !!predicted[c];
+      if (!gone) continue;
+
+      const x0 = x(c * FRAME_MS), x1 = x((c + 1) * FRAME_MS);
+      const inset = Math.min(4, (x1 - x0) * 0.16);
+
+      sctx.fillStyle = measured ? 'rgba(163, 36, 20, 0.12)' : 'rgba(163, 36, 20, 0.07)';
+      sctx.fillRect(x0, 0, x1 - x0, h);
+
+      sctx.lineWidth = measured ? 1.25 : 1;
+      sctx.setLineDash(measured ? [] : [4, 3]);
+      sctx.strokeStyle = measured ? 'rgba(163, 36, 20, 0.6)' : 'rgba(163, 36, 20, 0.5)';
+      sctx.beginPath();
+      sctx.moveTo(x0 + inset, inset);      sctx.lineTo(x1 - inset, h - inset);
+      sctx.moveTo(x1 - inset, inset);      sctx.lineTo(x0 + inset, h - inset);
+      sctx.stroke();
+
+      // the cell walls, so a run of struck cells still reads as separate ones
+      sctx.setLineDash([]);
+      sctx.lineWidth = 1;
+      sctx.strokeStyle = measured ? 'rgba(163, 36, 20, 0.34)' : 'rgba(163, 36, 20, 0.2)';
+      sctx.beginPath();
+      sctx.moveTo(x0 + 0.5, 0); sctx.lineTo(x0 + 0.5, h);
+      sctx.moveTo(x1 - 0.5, 0); sctx.lineTo(x1 - 0.5, h);
+      sctx.stroke();
+    }
+    sctx.setLineDash([]);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Transport                                                           */
+  /* ------------------------------------------------------------------ */
+
+  /* There is no transport. The take runs from the moment the page opens and
+     keeps running, because the thing being demonstrated is what a task does
+     to an animation that is already going -- and an animation you have to
+     press play on is not one that was already going. Dragging the ruler is
+     still there for anyone who wants to stand still inside it. */
+  function start() {
+    playing = true;
+    lapStart = performance.now() - t;
+    lastSlot = null;
+    fired.clear();
+    tasks.forEach((task) => { if (task.at < t) fired.add(task.id); });
+    syncSweep();
+  }
+
+  function removeSelected() {
+    if (!selected) return;
+    tasks = tasks.filter((x) => x.id !== selected);
+    selected = null;
+    invalidate();
+    drawTasks();
+  }
+
+  btnSplit.addEventListener('click', toggleChunks);
+  /* There is no separate row of paint ticks any more -- a drawing crossed out
+     on the strip says the same thing in the language the page is already
+     speaking -- so the strip itself is what you click to open a frame. The
+     ones the browser breaks down are the slow ones, which are the crossed-out
+     ones, so a click on a cross generally lands on something. */
+  document.querySelector('.lane-clip').addEventListener('click', (e) => {
+    const at = ms(e.clientX - lanes.getBoundingClientRect().left);
+    const slot = Math.floor(at / VSYNC);
+    // The openable frames are sparse, so a click near one counts as a click on it.
+    for (let d = 0; d <= 3; d++) {
+      if (frames[slot + d]) return openFrame(slot + d);
+      if (d && frames[slot - d]) return openFrame(slot - d);
+    }
+    closeFrame();
+  });
+  $('ins-close').addEventListener('click', closeFrame);
+
+  $('clear').addEventListener('click', () => {
+    tasks = []; selected = null; invalidate(); drawTasks();
   });
 
-  $('record').addEventListener('click', () => {
-    document.body.classList.toggle('recording');
-    sizeChart();
+  addEventListener('keydown', (e) => {
+    // A key event can target the document or the window, neither of which has
+    // matches(); and the yield picker wants its own arrow keys.
+    const el = e.target;
+    if (el && el.matches && el.matches('input, select, textarea')) return;
+    if (e.key === 'Escape') { closeFrame(); }
+    else if ((e.key === 'Backspace' || e.key === 'Delete') && selected) { e.preventDefault(); removeSelected(); }
+    else if (selected && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+      const task = tasks.find((x) => x.id === selected);
+      const step = (e.shiftKey ? VSYNC : 1) * (e.key === 'ArrowLeft' ? -1 : 1);
+      task.at = Math.max(0, Math.min(TOTAL - task.dur, task.at + step));
+      e.preventDefault();
+      drawTasks();
+    }
   });
 
-  $('support').addEventListener('click', () => {
-    const lines = [
-      `scheduler.yield()        ${hasYield ? 'available' : 'missing, falling back to setTimeout(0)'}`,
-      `Long Animation Frames    ${loafSupported ? 'available' : 'missing'}`,
-      `Event Timing             ${defaultTracker.supported ? 'available' : 'missing'}`,
-      `requestIdleCallback      ${'requestIdleCallback' in window ? 'available' : 'missing'}`,
-      `isInputPending           ${navigator.scheduling?.isInputPending ? 'available' : 'missing'}`,
-      `Web Workers              ${workerSupported ? 'available' : 'blocked here'}`
-    ];
-    $('supportOut').textContent = lines.join('\n');
-  });
+  // The track is always exactly as wide as there is room for it, so a resize
+  // is a re-fit rather than a scroll.
+  addEventListener('resize', () => { scaleScene(); fit(); sizeCanvas(); });
 
-  renderInp();
+  buildLibrary();
+  scaleScene();
+  fit();
+  start();
+  requestAnimationFrame(frame);
 })();
 </script>
 </body>
